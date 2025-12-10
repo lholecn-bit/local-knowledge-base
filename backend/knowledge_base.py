@@ -77,11 +77,11 @@ class LocalKnowledgeBase:
             
             # 读取自定义 API 端点
             api_base = os.getenv('OPENAI_BASE_URL')
-            
+
             embeddings = OpenAIEmbeddings(
                 api_key=self.api_key,
                 model="text-embedding-3-small",
-                api_base=api_base
+                base_url=api_base
             )
             print(f"✅ OpenAI Embeddings 初始化成功！")
             if api_base:
@@ -143,6 +143,7 @@ class LocalKnowledgeBase:
             return False
     
     def add_documents(self, file_paths: List[str]) -> Dict:
+        print(f"\n📂 开始处理 {len(file_paths)} 个文件...")
         """添加文档到知识库"""
         if not self.embeddings:
             return {
@@ -359,28 +360,74 @@ class LocalKnowledgeBase:
         """从上传的文件添加文档"""
         import tempfile
         import shutil
+        from pathlib import Path
         
         temp_dir = tempfile.mkdtemp()
         file_paths = []
+        processed_files = []
         
         try:
-            for file in files:
-                temp_path = Path(temp_dir) / file.filename
-                with open(temp_path, 'wb') as f:
-                    f.write(file.file.read())
-                file_paths.append(str(temp_path))
+            print(f"\n📝 开始处理上传的文件，共 {len(files)} 个")
             
+            for idx, file in enumerate(files):
+                try:
+                    filename = file.filename
+                    if not filename:
+                        print(f"  ⚠️  文件 {idx+1} 没有文件名，跳过")
+                        continue
+                    
+                    print(f"  处理文件 {idx+1}: {filename}")
+                    
+                    # ✅ 使用临时目录保存文件
+                    temp_path = Path(temp_dir) / filename
+                    file.save(str(temp_path))
+                    file_paths.append(str(temp_path))
+                    processed_files.append(filename)
+                    print(f"    ✅ 已保存到临时目录")
+                    
+                except Exception as e:
+                    print(f"  ❌ 处理文件失败: {e}")
+                    continue
+            
+            if not file_paths:
+                print("❌ 没有有效的文件可以处理")
+                return {
+                    'added_chunks': 0,
+                    'files': [],
+                    'errors': ['没有有效的文件']
+                }
+            
+            print(f"\n📚 开始处理文档向量化（{len(file_paths)} 个文件）...")
             result = self.add_documents(file_paths)
             
             # 保存文件到知识库目录
+            print(f"\n💾 保存文件到知识库...")
             for file_path in file_paths:
-                path = Path(file_path)
-                dest_path = self.db_path / "documents" / path.name
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(file_path, dest_path)
-                print(f"  📄 文件已保存: {dest_path}")
+                try:
+                    path = Path(file_path)
+                    dest_path = self.db_path / "documents" / path.name
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(file_path, dest_path)
+                    print(f"  ✅ {path.name}")
+                except Exception as e:
+                    print(f"  ⚠️  保存失败: {e}")
             
+            print(f"\n✅ 上传完成!\n")
             return result
         
+        except Exception as e:
+            print(f"\n❌ 上传处理失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'added_chunks': 0,
+                'files': [],
+                'errors': [str(e)]
+            }
+        
         finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            # 清理临时目录
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except:
+                pass

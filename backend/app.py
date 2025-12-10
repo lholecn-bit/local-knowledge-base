@@ -48,9 +48,12 @@ except Exception as e:
 
 # ==================== API 端点 ====================
 
-@app.route('/api/kb/stats', methods=['GET'])
+@app.route('/api/kb/stats', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
 def get_kb_stats():
     """获取知识库统计信息"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
@@ -61,33 +64,59 @@ def get_kb_stats():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/documents/upload', methods=['POST'])
+@app.route('/api/documents/upload', methods=['POST', 'OPTIONS'])
 def upload_documents():
     """上传文档到知识库"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
     try:
+        print("\n" + "="*60)
+        print("📤 收到上传请求")
+        print("="*60)
+        
+        # 检查是否有文件
         if 'files' not in request.files:
+            print("❌ 错误：request.files 中没有 'files' 键")
+            print(f"   request.files 的键: {list(request.files.keys())}")
             return jsonify({'error': '没有上传文件'}), 400
         
         files = request.files.getlist('files')
-        if not files:
+        print(f"✅ 获取到 {len(files)} 个文件")
+        
+        if not files or all(f.filename == '' for f in files):
+            print("❌ 错误：文件列表为空或文件名为空")
             return jsonify({'error': '文件列表为空'}), 400
         
-        print(f"\n📤 上传 {len(files)} 个文件...")
+        # 打印文件信息
+        for idx, file in enumerate(files):
+            print(f"  文件 {idx+1}: {file.filename} (类型: {type(file).__name__})")
+        
+        # ✅ 直接传递 FileStorage 列表
         result = kb.add_documents_from_upload(files)
         
+        print("="*60)
+        print(f"✅ 上传结果: {result}\n")
         return jsonify(result), 200
+    
     except Exception as e:
         print(f"❌ 上传失败: {e}")
+        import traceback
         traceback.print_exc()
+        print("="*60 + "\n")
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/kb/search', methods=['POST'])
+
+@app.route('/api/kb/search', methods=['POST', 'OPTIONS'])  # ✅ 加 OPTIONS
 def search_kb():
     """搜索知识库"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
@@ -106,9 +135,12 @@ def search_kb():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/kb/query', methods=['POST'])
+@app.route('/api/kb/query', methods=['POST', 'OPTIONS'])  # ✅ 加 OPTIONS
 def query_kb():
     """查询知识库"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
@@ -247,22 +279,36 @@ def stream_query():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/kb/clear', methods=['POST'])
+@app.route('/api/clear', methods=['POST', 'OPTIONS'])  # ✅ 改这里！改为 /api/clear
 def clear_kb():
     """清空知识库"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
     try:
+        print("\n" + "="*60)
+        print("🗑️  清空知识库")
+        print("="*60)
+        
         kb.clear()
+        
+        print("✅ 知识库已清空\n")
         return jsonify({'message': '知识库已清空'}), 200
     except Exception as e:
+        print(f"❌ 清空失败: {e}")
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/documents/list', methods=['GET'])
+@app.route('/api/documents/list', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
 def list_documents():
     """列出所有文档"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
@@ -273,9 +319,13 @@ def list_documents():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/documents/<filename>', methods=['DELETE'])
+
+@app.route('/api/documents/<filename>', methods=['DELETE', 'OPTIONS'])  # ✅ 加 OPTIONS
 def delete_document(filename):
     """删除文档"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
@@ -286,9 +336,12 @@ def delete_document(filename):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
 def health_check():
     """健康检查"""
+    if request.method == 'OPTIONS':  # ✅ 加这个
+        return '', 204
+    
     return jsonify({
         'status': 'ok',
         'kb_initialized': kb is not None
