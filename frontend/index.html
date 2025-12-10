@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>本地知识库系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Highlight.js 代码高亮库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css">
+    <style>
+        /* 消息样式 */
+        .message {
+            margin: 15px 0;
+            padding: 12px;
+            border-radius: 8px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 40px;
+            text-align: right;
+        }
+
+        .assistant-message {
+            background-color: #f5f5f5;
+            margin-right: 40px;
+        }
+
+        .message-content {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+        }
+
+        /* 代码块样式 */
+        pre {
+            background-color: #282c34;
+            color: #abb2bf;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+            line-height: 1.5;
+            font-size: 0.9em;
+            border-left: 4px solid #61afef;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        code {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        pre code {
+            background-color: transparent;
+            color: #abb2bf;
+            padding: 0;
+            border-radius: 0;
+            font-size: 0.95em;
+            white-space: pre;
+        }
+
+        /* 行内代码 */
+        code:not(pre code) {
+            background-color: #f0f0f0;
+            color: #d63384;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            border: 1px solid #e9ecef;
+        }
+
+        /* 代码高亮主题调整 */
+        .hljs {
+            background: transparent !important;
+            padding: 0 !important;
+            color: #abb2bf !important;
+        }
+
+        .hljs-string { color: #98c379; }
+        .hljs-number { color: #d19a66; }
+        .hljs-literal { color: #61afef; }
+        .hljs-attr { color: #e06c75; }
+        .hljs-title { color: #61afef; }
+        .hljs-name { color: #e06c75; }
+        .hljs-type { color: #61afef; }
+        .hljs-params { color: #abb2bf; }
+        .hljs-built_in { color: #61afef; }
+        .hljs-keyword { color: #c678dd; }
+        .hljs-variable { color: #e06c75; }
+        .hljs-comment { color: #5c6370; font-style: italic; }
+        .hljs-function { color: #61afef; }
+
+        /* 源文档样式 */
+        .sources-container {
+            background-color: #f9f9f9;
+            border-left: 3px solid #4c6ef5;
+            padding: 12px;
+            margin-top: 12px;
+            border-radius: 4px;
+        }
+
+        .sources-container strong {
+            color: #4c6ef5;
+        }
+
+        .sources-container ul {
+            margin: 8px 0 0 20px;
+            padding: 0;
+        }
+
+        .sources-container li {
+            margin: 4px 0;
+            color: #555;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>📚 知识库</h1>
+            </div>
+
+            <!-- 统计信息 -->
+            <div class="stats-card">
+                <div class="stat-item">
+                    <span class="stat-label">文本块数量</span>
+                    <span class="stat-value" id="totalChunks">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">状态</span>
+                    <span class="stat-status" id="dbStatus">加载中...</span>
+                </div>
+            </div>
+
+            <!-- 上传文件 -->
+            <div class="upload-section">
+                <h3>📤 上传文档</h3>
+                <div class="file-input-wrapper">
+                    <input 
+                        type="file" 
+                        id="fileInput" 
+                        multiple 
+                        accept=".pdf,.txt,.md,.docx"
+                    >
+                    <label for="fileInput" class="file-input-label">
+                        选择文件
+                    </label>
+                </div>
+                <p class="file-hint">支持格式：PDF, TXT, Markdown, Word</p>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <span id="progressText">0%</span>
+                </div>
+            </div>
+
+            <!-- 文档列表 -->
+            <div class="documents-section">
+                <h3>📄 已上传文档</h3>
+                <div class="documents-list" id="documentsList">
+                    <p class="no-documents">暂无文档</p>
+                </div>
+            </div>
+
+            <!-- 操作按钮 -->
+            <div class="actions">
+                <button id="clearKbBtn" class="btn btn-danger btn-block">
+                    🗑️ 清空知识库
+                </button>
+                <button id="refreshStatsBtn" class="btn btn-primary btn-block">
+                    🔄 刷新统计
+                </button>
+            </div>
+        </aside>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 对话区域 -->
+            <div class="chat-container">
+                <div class="chat-history" id="chatHistory">
+                    <div class="welcome-message">
+                        <h2>👋 欢迎使用知识库系统</h2>
+                        <p>请上传文档，然后提出您的问题</p>
+                        <div class="tips">
+                            <h4>使用提示：</h4>
+                            <ul>
+                                <li>在左侧上传 PDF、Word、TXT 或 Markdown 文件</li>
+                                <li>系统会自动处理文件内容并创建向量索引</li>
+                                <li>在下方输入您的问题，系统会基于已上传的文档回答</li>
+                                <li>支持多轮对话</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 输入区域 -->
+                <div class="input-area">
+                    <div class="mode-selector">
+                        <label class="mode-radio">
+                            <input type="radio" name="queryMode" value="auto" checked>
+                            <span>🔄 自动</span>
+                        </label>
+                        <label class="mode-radio">
+                            <input type="radio" name="queryMode" value="kb">
+                            <span>📚 知识库</span>
+                        </label>
+                        <label class="mode-radio">
+                            <input type="radio" name="queryMode" value="llm">
+                            <span>🤖 直接AI</span>
+                        </label>
+                    </div>
+                    
+                    <div class="input-wrapper">
+                        <input 
+                            type="text" 
+                            id="questionInput" 
+                            placeholder="请输入您的问题..." 
+                            class="question-input"
+                            autocomplete="off"
+                        >
+                        <button id="sendBtn" class="btn btn-primary">
+                            📤 发送
+                        </button>
+                        <button id="stopBtn" class="btn btn-warning" style="display: none;">
+                            ⏹️ 停止
+                        </button>
+                    </div>
+
+                    <div class="search-options">
+                        <label>
+                            <input type="checkbox" id="useStreamCheckbox" checked>
+                            流式响应
+                        </label>
+                        <label>
+                            相关文档数：
+                            <input type="number" id="topKInput" value="3" min="1" max="10">
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 加载动画 -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="spinner"></div>
+        <p id="loadingText">处理中...</p>
+    </div>
+
+    <!-- 模态框：确认清空 -->
+    <div class="modal" id="confirmModal" style="display: none;">
+        <div class="modal-content">
+            <h3>确认操作</h3>
+            <p id="confirmText">确定要清空知识库吗？此操作不可撤销。</p>
+            <div class="modal-buttons">
+                <button id="confirmYesBtn" class="btn btn-danger">确认</button>
+                <button id="confirmNoBtn" class="btn btn-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
+    <!-- Highlight.js 高亮库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>
+        // 确保应用已初始化
+        console.log('应用已加载:', typeof app !== 'undefined');
+    </script>
+</body>
+</html>
