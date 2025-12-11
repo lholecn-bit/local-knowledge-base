@@ -85,6 +85,7 @@ class App {
 
     async handleStreamQuery(requestData) {
         try {
+            console.log('🚀 开始流式查询，模式:', this.conversationMode);  // ← 添加这行
             this.ui.addStreamMessage();
 
             const response = await this.api.queryStream(requestData);
@@ -94,16 +95,28 @@ class App {
 
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    console.log('✅ 流式传输完成');  // ← 添加这行
+                    break;
+                }
 
                 const chunk = decoder.decode(value);
                 const lines = chunk.split('\n').filter(line => line.trim());
+                console.log(`📥 收到 ${lines.length} 行数据`);  // ← 添加这行
 
                 for (const line of lines) {
                     try {
                         const data = JSON.parse(line);
+                        console.log(`📋 数据类型: ${data.type}`);  // ← 看一下类型
 
                         if (data.type === 'start') {
+                            // ✅ 只在这里打印 START 相关信息
+                            console.log('✅ START 信号接收到:');
+                            console.log('   sources:', data.sources);
+                            console.log('   sources 类型:', typeof data.sources);
+                            console.log('   sources[0]:', data.sources?.[0]);
+                            console.log('   sources[0] 类型:', typeof data.sources?.[0]);
+
                             if (data.mode === 'kb') {
                                 modeLabel = '📚 知识库';
                             } else if (data.mode === 'llm') {
@@ -118,19 +131,26 @@ class App {
                                 this.ui.showSources(data.sources);
                             }
                         } else if (data.type === 'stream') {
+                            console.log(`📝 收到流数据，长度: ${data.data.length}`);  // ← 可选
                             this.ui.updateStreamMessage(data.data);
+                        } else if (data.type === 'done') {
+                            console.log('✨ 完成信号');  // ← 可选
                         } else if (data.type === 'error') {
+                            console.error('❌ 错误:', data.message);
                             this.ui.showNotification(data.message, 'error');
                         }
                     } catch (e) {
-                        console.error('解析流数据失败:', e);
+                        console.error('❌ 解析流数据失败:', e);
+                        console.error('   原始行:', line);
                     }
                 }
             }
         } catch (error) {
+            console.error('❌ 流式查询异常:', error);
             throw error;
         }
     }
+
 
     async handleFileUpload(files) {
         if (files.length === 0) return;

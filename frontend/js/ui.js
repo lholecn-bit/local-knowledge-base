@@ -205,21 +205,30 @@ constructor() {
     }
 
     _buildSourcesHtml(sources) {
-        let sourcesHtml = '<div class="sources-container"><strong>📚 相关文档：</strong><ul>';
-        const addedSources = new Set();
+        if (!sources || sources.length === 0) return '';
+        
+        const sourcesList = [];
+        const seenFilenames = new Set();
         
         for (const source of sources) {
-            const filename = source.source || source.filename || source.name || 'Unknown';
+            // ✅ 兼容两种格式：
+            // 1. 直接字符串：["file1.pdf", "file2.md"]
+            // 2. 对象格式：[{source: "file1.pdf", content: "...", score: 0.95}, ...]
+            const filename = typeof source === 'string' 
+                ? source 
+                : (source.source || source.filename || source.name);
             
-            if (addedSources.has(filename)) continue;
-            addedSources.add(filename);
+            if (!filename || seenFilenames.has(filename)) continue;
             
-            sourcesHtml += `<li><strong>${this.escapeHtml(filename)}</strong></li>`;
+            seenFilenames.add(filename);
+            sourcesList.push(`<li>📄 ${this.escapeHtml(filename)}</li>`);
         }
         
-        sourcesHtml += '</ul></div>';
-        return sourcesHtml;
+        if (sourcesList.length === 0) return '';
+        
+        return `<div class="sources-container"><strong>📚 相关文档：</strong><ul>${sourcesList.join('')}</ul></div>`;
     }
+
 
     /**
      * 高亮代码块（最终修复版）
