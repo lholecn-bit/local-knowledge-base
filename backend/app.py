@@ -162,7 +162,7 @@ def query_kb():
 
 @app.route('/api/stream-query', methods=['POST', 'OPTIONS'])
 def stream_query():
-    """✅ 流式查询端点"""
+    """✅ 流式查询端点 - 正确的 RAG 实现"""
     if request.method == 'OPTIONS':
         return '', 204
     
@@ -174,7 +174,6 @@ def stream_query():
         question = data.get('question', '')
         mode = data.get('mode', 'auto')
         top_k = data.get('top_k', 3)
-        use_stream = data.get('use_stream', True)
         
         if not question:
             return jsonify({'error': '问题不能为空'}), 400
@@ -182,10 +181,17 @@ def stream_query():
         print(f"\n🔍 流式查询: {question}")
         print(f"   模式: {mode}, topK: {top_k}")
         
-        # ✅ 使用生成器生成流式数据
         def generate():
             try:
-                # 获取相关文档
+                from llm_client import LLMClient
+                
+                llm = LLMClient(
+                    api_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+                    api_key=os.getenv('OPENAI_API_KEY'),
+                    model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
+                )
+                
+                # ✅ 第一步：搜索知识库（无论什么模式都先搜索）
                 search_results = kb.search(question, top_k)
                 sources = [doc['source'] for doc in search_results['results']]
                 
@@ -196,59 +202,30 @@ def stream_query():
                     'sources': sources
                 }) + '\n'
                 
+                # ✅ 第二步：根据模式构建提示词并调用 LLM
                 if mode == 'kb':
-                    # 知识库模式：直接返回搜索结果
-                    answer = "\n\n".join([
-                        f"【{doc['source']}】\n{doc['content']}"
-                        for doc in search_results['results']
-                    ])
-                    yield json.dumps({
-                        'type': 'stream',
-                        'data': answer or "知识库中未找到相关内容"
-                    }) + '\n'
+                    # RAG 模式：知识库 + LLM
+                    answer = _rag_query(question, search_results, llm)
                 
                 elif mode == 'llm':
-                    # LLM 模式：直接调用 LLM
-                    from llm_client import LLMClient
-                    
-                    llm = LLMClient(
-                        api_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-                        api_key=os.getenv('OPENAI_API_KEY'),
-                        model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
-                    )
-                    
-                    # 同步调用 LLM（简单方式）
+                    # 直接 LLM 模式：忽略知识库
                     answer = llm.chat(question)
-                    yield json.dumps({
-                        'type': 'stream',
-                        'data': answer
-                    }) + '\n'
                 
-                else:  # auto 模式
-                    # 如果有相关文档，先返回文档
+                elif mode == 'auto':
+                    # 自动模式：有相关内容则 RAG，无则直接 LLM
                     if search_results['results']:
-                        docs_answer = "\n\n".join([
-                            f"【{doc['source']}】\n{doc['content']}"
-                            for doc in search_results['results']
-                        ])
-                        yield json.dumps({
-                            'type': 'stream',
-                            'data': docs_answer
-                        }) + '\n'
+                        answer = _rag_query(question, search_results, llm)
                     else:
-                        # 没有相关文档，调用 LLM
-                        from llm_client import LLMClient
-                        
-                        llm = LLMClient(
-                            api_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-                            api_key=os.getenv('OPENAI_API_KEY'),
-                            model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
-                        )
                         answer = llm.chat(question)
-                        yield json.dumps({
-                            'type': 'stream',
-                            'data': answer
-                        }) + '\n'
+                
+                else:
+                    answer = "未知的查询模式"
+                
+                # ✅ 第三步：流式发送答案
+                yield json.dumps({
+                    'type': 'stream',
+                    'data': answer
+                }) + '\n'
                 
                 # 发送完成信号
                 yield json.dumps({'type': 'done'}) + '\n'
@@ -262,7 +239,6 @@ def stream_query():
                     'message': str(e)
                 }) + '\n'
         
-        # ✅ 返回流式响应
         return Response(
             generate(),
             mimetype='application/x-ndjson',
@@ -277,6 +253,39 @@ def stream_query():
         print(f"❌ 流式查询失败: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+def _rag_query(question, search_results, llm):
+    """
+    RAG 查询：将知识库内容和问题一起发给 LLM
+    """
+    # ✅ 格式化知识库内容
+    context_parts = []
+    for doc in search_results['results']:
+        context_parts.append(f"【{doc['source']}】\n{doc['content']}")
+    context = "\n\n".join(context_parts)
+    
+    # ✅ 构建 RAG 提示词
+    rag_prompt = f"""你是一个专业的助手。请根据以下知识库中的内容，回答用户的问题。
+
+【知识库内容】
+{context}
+
+【用户问题】
+{question}
+
+请求解释：
+1. 优先使用知识库中的信息回答
+2. 如果知识库中没有相关信息，请明确说明
+3. 保持回答清晰、准确、有条理
+4. 必要时可以引用知识库的具体内容
+
+回答："""
+    
+    # ✅ 调用 LLM
+    answer = llm.chat(rag_prompt)
+    return answer
+
 
 
 @app.route('/api/clear', methods=['POST', 'OPTIONS'])  # ✅ 改这里！改为 /api/clear
