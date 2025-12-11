@@ -105,6 +105,7 @@ constructor() {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message assistant-message';
         
+        // ✅ 用 marked.js 渲染
         let content = `<div class="message-content">${this.markdownToHtml(message)}</div>`;
         
         if (sources && sources.length > 0) {
@@ -114,9 +115,9 @@ constructor() {
         messageDiv.innerHTML = content;
         this.chatHistory.appendChild(messageDiv);
         
-        this._highlightCode(messageDiv);
         this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
     }
+
 
     addStreamMessage() {
         this.currentMessageEl = document.createElement('div');
@@ -128,7 +129,7 @@ constructor() {
     }
 
     /**
-     * 处理流式内容（只做一次，不重复处理）
+     * 处理流式内容（使用 marked.js）
      */
     _processStreamContent(element) {
         if (!element) return;
@@ -136,15 +137,13 @@ constructor() {
         // ✅ 获取纯文本
         const plainText = element.textContent;
         
-        // ✅ 转换为 HTML
+        // ✅ 用 marked.js 转换为 HTML
         const htmlContent = this.markdownToHtml(plainText);
         
         // ✅ 设置 HTML
         element.innerHTML = htmlContent;
-        
-        // ✅ 最后才高亮
-        this._highlightCode(element);
     }
+
 
     updateStreamMessage(text) {
         if (!text) return;
@@ -156,10 +155,10 @@ constructor() {
         if (this.currentMessageEl) {
             const contentDiv = this.currentMessageEl.querySelector('.stream-content');
             if (contentDiv) {
-                // ✅ 只追加纯文本到 textContent
+                // ✅ 只追加纯文本
                 contentDiv.textContent += text;
                 
-                // ✅ 延迟处理
+                // ✅ 延迟处理（等待流数据稳定）
                 clearTimeout(this._highlightTimeout);
                 this._highlightTimeout = setTimeout(() => {
                     this._processStreamContent(contentDiv);
@@ -170,25 +169,25 @@ constructor() {
         }
     }
 
-    /**
-     * 延迟高亮（防止频繁重排）
-     */
-    _scheduleHighlight(element) {
-        if (this._highlightTimeout) {
-            clearTimeout(this._highlightTimeout);
-        }
+    // /**
+    //  * 延迟高亮（防止频繁重排）
+    //  */
+    // _scheduleHighlight(element) {
+    //     if (this._highlightTimeout) {
+    //         clearTimeout(this._highlightTimeout);
+    //     }
         
-        this._highlightTimeout = setTimeout(() => {
-            // ✅ 现在才转换 Markdown 为 HTML
-            const text = element.textContent;
-            element.innerHTML = this.markdownToHtml(text);
+    //     this._highlightTimeout = setTimeout(() => {
+    //         // ✅ 现在才转换 Markdown 为 HTML
+    //         const text = element.textContent;
+    //         element.innerHTML = this.markdownToHtml(text);
             
-            // ✅ 然后高亮代码块
-            this._highlightCode(element);
+    //         // ✅ 然后高亮代码块
+    //         this._highlightCode(element);
             
-            this._highlightTimeout = null;
-        }, 300);  // 300ms 延迟，等待流数据稳定
-    }
+    //         this._highlightTimeout = null;
+    //     }, 300);  // 300ms 延迟，等待流数据稳定
+    // }
 
 
     showSources(sources) {
@@ -429,67 +428,69 @@ constructor() {
     }
 
     /**
-     * Markdown 转 HTML（改进版，处理代码块更严谨）
+     * Markdown 转 HTML（完整版 - 包含错误处理和自定义渲染）
      */
     markdownToHtml(text) {
         if (!text) return '';
         
-        // ✅ 如果已经包含高亮后的 HTML，直接返回
-        if (text.includes('hljs') || text.includes('data-highlighted')) {
-            return text;
+        // ✅ 检查 marked 库
+        if (typeof marked === 'undefined') {
+            console.warn('⚠️ marked.js 库未加载');
+            return this.escapeHtml(text).replace(/\n/g, '<br>');
         }
         
-        const codeBlocks = [];
-        let html = text;
-        
-        // ✅ 提取代码块：```language\n...code...\n```
-        html = html.replace(/```([a-z0-9\-_]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-            const placeholder = `__CODEBLOCK_${codeBlocks.length}__`;
-            const cleanCode = code.trim()
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
+        try {
+            // ✅ 保存 this 引用（因为在 highlight 函数里 this 会改变）
+            const self = this;
             
-            // ✅ 确保语言标签不为空或只有空格
-            const langTrimmed = lang ? lang.trim() : '';
-            const langAttr = langTrimmed ? `class="language-${langTrimmed}"` : 'class="language-plaintext"';
+            // ✅ 配置 marked
+            marked.setOptions({
+                breaks: true,
+                gfm: true,
+                pedantic: false,
+                mangle: false,
+                // ✅ 设置代码高亮函数
+                highlight: (code, language) => {
+                    // ✅ 移除代码块周围的空格
+                    code = code.trim();
+                    
+                    // ✅ 尝试用指定语言高亮
+                    if (language && typeof hljs !== 'undefined') {
+                        try {
+                            const highlighted = hljs.highlight(code, { 
+                                language: language,
+                                ignoreIllegals: true 
+                            }).value;
+                            return highlighted;
+                        } catch (err) {
+                            console.debug(`语言 '${language}' 高亮失败，尝试自动检测`);
+                        }
+                    }
+                    
+                    // ✅ 自动检测语言
+                    if (typeof hljs !== 'undefined') {
+                        try {
+                            return hljs.highlightAuto(code).value;
+                        } catch (err) {
+                            console.debug('自动检测失败，返回原始代码');
+                        }
+                    }
+                    
+                    // ✅ 备用方案：转义 HTML（使用 self 而不是 this）
+                    return self.escapeHtml(code);
+                }
+            });
             
-            codeBlocks.push(`<pre><code ${langAttr}>${cleanCode}</code></pre>`);
-            return placeholder;
-        });
-        
-        // ✅ 提取代码块：```...code...```（不带语言）
-        html = html.replace(/```([\s\S]*?)```/g, (match, code) => {
-            const placeholder = `__CODEBLOCK_${codeBlocks.length}__`;
-            const cleanCode = code.trim()
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-            codeBlocks.push(`<pre><code class="language-plaintext">${cleanCode}</code></pre>`);
-            return placeholder;
-        });
-        
-        // ✅ 转义剩余的 HTML
-        html = this.escapeHtml(html);
-        
-        // ✅ 恢复代码块
-        for (let i = 0; i < codeBlocks.length; i++) {
-            html = html.replace(`__CODEBLOCK_${i}__`, codeBlocks[i]);
+            // ✅ 渲染 Markdown
+            const html = marked.parse(text);
+            
+            return html;
+        } catch (error) {
+            console.error('❌ Markdown 渲染失败:', error);
+            // ✅ 降级处理：返回转义后的文本
+            return this.escapeHtml(text).replace(/\n/g, '<br>');
         }
-        
-        // ✅ 行内代码
-        html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-        
-        // ✅ 加粗
-        html = html.replace(/\*\*([^\*]+?)\*\*/g, '<strong>$1</strong>');
-        
-        // ✅ 斜体
-        html = html.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
-        
-        // ✅ 换行
-        html = html.replace(/\n/g, '<br>');
-        
-        return html;
     }
+
 
 }
