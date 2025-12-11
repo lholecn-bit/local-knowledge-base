@@ -162,7 +162,7 @@ def query_kb():
 
 @app.route('/api/stream-query', methods=['POST', 'OPTIONS'])
 def stream_query():
-    """✅ 流式查询端点 - 正确的 RAG 实现"""
+    """✅ 流式查询端点 - 改进的 RAG 实现（带相关性过滤）"""
     if request.method == 'OPTIONS':
         return '', 204
     
@@ -193,33 +193,56 @@ def stream_query():
                 
                 # ✅ 第一步：搜索知识库（无论什么模式都先搜索）
                 search_results = kb.search(question, top_k)
-                sources = [doc['source'] for doc in search_results['results']]
+                
+                # ✅ 关键改动：只在有相关文档时才包含 sources
+                has_relevant_docs = search_results.get('has_results', False)
+                sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
+                
+                # ✅ 去重 sources
+                sources = list(dict.fromkeys(sources))
+                
+                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
+                print(f"   📄 相关文档: {sources}")
+                print(f"   ✅ 有相关文档: {has_relevant_docs}")
                 
                 # 发送开始信号
                 yield json.dumps({
                     'type': 'start',
                     'mode': mode,
-                    'sources': sources
+                    'sources': sources  # ✅ 只包含有相关性的文档
                 }) + '\n'
                 
                 # ✅ 第二步：根据模式构建提示词并调用 LLM
                 if mode == 'kb':
                     # RAG 模式：知识库 + LLM
-                    answer = _rag_query(question, search_results, llm)
+                    if has_relevant_docs:
+                        answer = _rag_query(question, search_results, llm)
+                        actual_mode = 'kb'
+                    else:
+                        # 知识库模式但无相关文档，直接用 LLM
+                        answer = llm.chat(question)
+                        print(f"   ⚠️  知识库模式但无相关文档，使用 LLM 直接回答")
+                        actual_mode = 'llm'
                 
                 elif mode == 'llm':
                     # 直接 LLM 模式：忽略知识库
                     answer = llm.chat(question)
+                    actual_mode = 'llm'
                 
                 elif mode == 'auto':
                     # 自动模式：有相关内容则 RAG，无则直接 LLM
-                    if search_results['results']:
+                    if has_relevant_docs:
                         answer = _rag_query(question, search_results, llm)
+                        actual_mode = 'kb'
+                        print(f"   🔄 自动模式：使用知识库模式回答")
                     else:
                         answer = llm.chat(question)
+                        actual_mode = 'llm'
+                        print(f"   🔄 自动模式：无相关文档，使用 LLM 模式回答")
                 
                 else:
                     answer = "未知的查询模式"
+                    actual_mode = mode
                 
                 # ✅ 第三步：流式发送答案
                 yield json.dumps({
@@ -229,6 +252,8 @@ def stream_query():
                 
                 # 发送完成信号
                 yield json.dumps({'type': 'done'}) + '\n'
+                
+                print(f"   ✅ 查询完成\n")
             
             except Exception as e:
                 print(f"❌ 流式查询错误: {e}")
@@ -258,6 +283,14 @@ def stream_query():
 def _rag_query(question, search_results, llm):
     """
     RAG 查询：将知识库内容和问题一起发给 LLM
+    
+    Args:
+        question: 用户问题
+        search_results: 搜索结果（包含 results 列表）
+        llm: LLM 客户端
+    
+    Returns:
+        LLM 生成的答案
     """
     # ✅ 格式化知识库内容
     context_parts = []

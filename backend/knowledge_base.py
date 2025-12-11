@@ -2,7 +2,7 @@
 
 import os
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 import hashlib
 from datetime import datetime
@@ -40,6 +40,9 @@ class LocalKnowledgeBase:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.metadata_file = self.db_path / "metadata.json"
+        
+        # ✅ 添加相关性阈值配置
+        self.relevance_threshold = 0.5  # 相关性阈值（可调整）
         
         # 获取 OpenAI API Key
         self.api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
@@ -276,38 +279,116 @@ class LocalKnowledgeBase:
         except:
             return ""
     
-    def search(self, query: str, top_k: int = 3) -> Dict:
-        """搜索知识库"""
+    def search(self, query: str, top_k: int = 3, 
+           relevance_threshold: Optional[float] = None) -> Dict:
+        """
+        搜索知识库
+        
+        Args:
+            query: 查询文本
+            top_k: 返回的最大结果数
+            relevance_threshold: 相关性阈值（0-1），低于此值的结果会被过滤
+                                如果为None，使用默认值 self.relevance_threshold
+        
+        Returns:
+            包含搜索结果的字典
+        """
         if not self.vector_store:
-            return {'question': query, 'results': []}
+            return {
+                'question': query,
+                'results': [],
+                'has_results': False
+            }
+        
+        # 使用提供的阈值或默认值
+        threshold = relevance_threshold if relevance_threshold is not None else self.relevance_threshold
         
         try:
-            results = self.vector_store.similarity_search_with_score(query, k=top_k)
-            documents = [
-                {
-                    'content': doc.page_content,
-                    'source': doc.metadata.get('source', 'Unknown'),
-                    'score': float(score)
-                }
-                for doc, score in results
-            ]
-            return {'question': query, 'results': documents}
+            # 搜索时获取更多结果，然后过滤
+            results = self.vector_store.similarity_search_with_score(query, k=top_k * 2)
+            
+            # ✅ 关键修复：FAISS 返回的 score 是距离，不是相似度
+            # 距离越小越相似，所以要用 1 / (1 + distance) 转换为相似度
+            filtered_results = []
+            for doc, distance in results:
+                # ✅ 正确的相似度计算：距离 → 相似度
+                # distance 范围：[0, ∞)
+                # similarity 范围：(0, 1]
+                # 使用公式：similarity = 1 / (1 + distance)
+                similarity = 1 / (1 + distance)
+                
+                source_name = doc.metadata.get('source', 'Unknown')
+                print(f"📊 搜索结果: {source_name} (距离: {distance:.3f}, 相似度: {similarity:.3f})")
+                
+                # ✅ 按相关性阈值过滤
+                if similarity >= threshold:
+                    filtered_results.append({
+                        'content': doc.page_content,
+                        'source': source_name,
+                        'score': similarity,
+                        'distance': distance  # 保留原始距离用于调试
+                    })
+                else:
+                    print(f"   ❌ 相似度过低，过滤掉")
+            
+            # ✅ 只返回 top_k 个结果
+            filtered_results = filtered_results[:top_k]
+            
+            has_results = len(filtered_results) > 0
+            
+            if not has_results:
+                print(f"⚠️ 未找到相关性 >= {threshold:.2%} 的文档")
+            else:
+                print(f"✅ 找到 {len(filtered_results)} 个相关文档")
+            
+            return {
+                'question': query,
+                'results': filtered_results,
+                'has_results': has_results
+            }
+        
         except Exception as e:
-            print(f"Search error: {e}")
-            return {'question': query, 'results': []}
+            print(f"❌ 搜索错误: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'question': query,
+                'results': [],
+                'has_results': False
+            }
+
     
     def query(self, question: str, top_k: int = 3) -> Dict:
-        """查询知识库"""
-        results = self.search(question, top_k)
+        """
+        查询知识库
+        
+        Returns:
+            {
+                'question': str,
+                'answer': str,
+                'sources': list,
+                'has_sources': bool  # ✅ 新增字段，表示是否有相关文档
+            }
+        """
+        search_results = self.search(question, top_k)
+        results = search_results['results']
+        has_sources = search_results['has_results']
+        
         answer = "\n\n".join([
             f"【{doc['source']}】\n{doc['content']}"
-            for doc in results['results']
+            for doc in results
         ])
+        
+        sources = [doc['source'] for doc in results]
+        
+        # ✅ 去重 sources
+        sources = list(dict.fromkeys(sources))
         
         return {
             'question': question,
             'answer': answer or "知识库中未找到相关内容",
-            'sources': [doc['source'] for doc in results['results']]
+            'sources': sources,
+            'has_sources': has_sources  # ✅ 新增：是否有相关文档
         }
     
     def get_stats(self) -> Dict:
