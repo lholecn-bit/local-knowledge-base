@@ -1,10 +1,5 @@
 // frontend/js/api.js
-const API_BASE = 'http://localhost:5000/api';  // 改为 8000
-
-// const API_CONFIG = {
-//     BASE_URL: 'http://localhost:5000/api',  // 改这里！
-//     TIMEOUT: 30000
-// };
+const API_BASE = 'http://localhost:5000/api'; 
 
 class API {
     constructor() {
