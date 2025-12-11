@@ -1,11 +1,17 @@
+# Flask Web Framework
 flask==2.3.2
 flask-cors==4.0.0
-python-dotenv==1.0.0
-uvicorn==0.24.0
-fastapi==0.100.1
+werkzeug==2.3.7
+gunicorn==21.2.0
 
-# LLM and Embeddings (OpenAI)
+# Environment Management
+python-dotenv==1.0.0
+
+# LLM and Embeddings
 openai>=1.6.1
+httpx>=0.25.0
+
+# LangChain (向量数据库 + 文本处理)
 langchain>=0.1.20
 langchain-core>=0.1.30
 langchain-community>=0.0.15
@@ -16,11 +22,13 @@ faiss-cpu==1.7.4
 
 # Document Processing
 pypdf==3.16.0
+PyPDF2==4.0.1
 python-docx==0.8.11
 markdown==3.4.1
 
-# Others
+# Network and Utilities
 requests>=2.31.0
-gunicorn==21.2.0
 
-werkzeug==2.3.7
+# Optional: for async support
+uvicorn==0.24.0
+fastapi==0.100.1
