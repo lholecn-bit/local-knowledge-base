@@ -42,7 +42,7 @@ class LocalKnowledgeBase:
         self.metadata_file = self.db_path / "metadata.json"
         
         # ✅ 添加相关性阈值配置
-        self.relevance_threshold = 0.5  # 相关性阈值（可调整）
+        self.relevance_threshold = 0.3  # 相关性阈值（可调整）
         
         # 获取 OpenAI API Key
         self.api_key = openai_api_key or os.getenv('OPENAI_API_KEY')

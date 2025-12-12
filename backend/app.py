@@ -191,8 +191,22 @@ def stream_query():
                     model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
                 )
                 
-                # ✅ 第一步：搜索知识库（无论什么模式都先搜索）
-                search_results = kb.search(question, top_k)
+                # ✅ 第一步：根据模式选择相关性阈值，然后搜索知识库
+                # 根据用户选择的模式调整阈值：
+                # - 'kb' 模式：用户更倾向于使用知识库，降低阈值以保留更多结果（0.2）
+                # - 'auto' 模式：自动选择，使用默认阈值（0.3）
+                # - 'llm' 模式：不需要搜索，但仍然搜索供显示用，使用严格阈值（0.4）
+                if mode == 'kb':
+                    relevance_threshold = 0.2  # 📚 知识库模式：更宽松，保留更多相关文档
+                    print(f"   📚 知识库模式：使用较宽松的阈值 (0.2)")
+                elif mode == 'llm':
+                    relevance_threshold = 0.4  # 🤖 LLM 模式：更严格，只显示高相关性文档
+                    print(f"   🤖 LLM 模式：使用较严格的阈值 (0.4)")
+                else:  # auto
+                    relevance_threshold = 0.3  # 自动模式：使用默认阈值
+                    print(f"   🔄 自动模式：使用默认阈值 (0.3)")
+                
+                search_results = kb.search(question, top_k, relevance_threshold=relevance_threshold)
                 
                 # ✅ 关键改动：只在有相关文档时才包含 sources
                 has_relevant_docs = search_results.get('has_results', False)
@@ -201,7 +215,7 @@ def stream_query():
                 # ✅ 去重 sources
                 sources = list(dict.fromkeys(sources))
                 
-                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
+                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档（阈值: {relevance_threshold:.2%}）")
                 print(f"   📄 相关文档: {sources}")
                 print(f"   ✅ 有相关文档: {has_relevant_docs}")
                 
