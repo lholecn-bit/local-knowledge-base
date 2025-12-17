@@ -59,3 +59,24 @@ logs/
 # 临时文件
 *.tmp
 temp/
+
+# 忽略模型缓存目录（匹配你的 models_cache 路径）
+models_cache/
+
+# 补充：通用的 Hugging Face 缓存（如果有其他缓存路径也加上）
+.huggingface/
+~/.cache/huggingface/
+
+# 忽略日志文件（xet 目录下的日志）
+xet/
+
+
+# 排除知识库的衍生索引文件
+# backend/knowledge_db/faiss_index/
+
+# 若 metadata.json 是衍生数据，也排除
+# backend/knowledge_db/metadata.json
+
+# 补充：通用的 Python 缓存（可选）
+# __pycache__/
+# *.pyc

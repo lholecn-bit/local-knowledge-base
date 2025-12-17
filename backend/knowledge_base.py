@@ -7,6 +7,21 @@ from pathlib import Path
 import hashlib
 from datetime import datetime
 
+from dotenv import load_dotenv
+# 加载环境变量，默认情况下，load_dotenv() 会在当前目录查找 .env 文件
+load_dotenv()
+
+# 🔥 关键：在最开始设置离线模式，优先使用本地缓存
+# 使用绝对路径避免相对路径混乱
+project_root = Path(__file__).parent.parent  # 项目根目录
+models_cache_path = project_root / 'models_cache'
+
+os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['HF_HOME'] = str(models_cache_path.absolute())
+os.environ['TRANSFORMERS_CACHE'] = str((models_cache_path / 'transformers').absolute())
+
+
+
 try:
     from langchain_community.document_loaders import PDFPlumberLoader, TextLoader
     from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -37,15 +52,25 @@ class LocalKnowledgeBase:
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
         
+        # ✅ 创建模型缓存目录 - 使用项目根目录的 models_cache
+        # 注意：这与上面设置的 HF_HOME 环境变量必须一致
+        project_root = Path(__file__).parent.parent
+        self.models_cache = project_root / 'models_cache'
+        self.models_cache.mkdir(parents=True, exist_ok=True)
+        
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.metadata_file = self.db_path / "metadata.json"
         
         # ✅ 添加相关性阈值配置
         self.relevance_threshold = 0.3  # 相关性阈值（可调整）
-        
+
         # 获取 OpenAI API Key
-        self.api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
+        self.api_key = os.getenv("OPENAI_API_KEY")
+
+        if openai_api_key:
+            self.api_key = openai_api_key        
+
         if not self.api_key:
             raise ValueError(
                 "❌ OPENAI_API_KEY 未设置！\n"
@@ -305,7 +330,7 @@ class LocalKnowledgeBase:
         
         try:
             # 搜索时获取更多结果，然后过滤
-            results = self.vector_store.similarity_search_with_score(query, k=top_k * 2)
+            results = self.vector_store.similarity_search_with_score(query, k=top_k * 2) # 双倍数量以便过滤
             
             # ✅ 关键修复：FAISS 返回的 score 是距离，不是相似度
             # 距离越小越相似，所以要用 1 / (1 + distance) 转换为相似度
@@ -323,9 +348,9 @@ class LocalKnowledgeBase:
                 # ✅ 按相关性阈值过滤
                 if similarity >= threshold:
                     filtered_results.append({
-                        'content': doc.page_content,
-                        'source': source_name,
-                        'score': similarity,
+                        'content': doc.page_content, # 文档内容
+                        'source': source_name, # 文档来源
+                        'score': similarity, # 使用相似度作为分数
                         'distance': distance  # 保留原始距离用于调试
                     })
                 else:
@@ -357,7 +382,121 @@ class LocalKnowledgeBase:
                 'has_results': False
             }
 
-    
+    def search(self, query: str, top_k: int = 3, use_reranking: bool = True) -> Dict:
+        """
+        搜索知识库（支持重排序）
+        
+        Args:
+            query: 查询文本
+            top_k: 返回的结果数
+            use_reranking: 是否使用重排序器
+        """
+        if not self.vector_store:
+            return {'question': query, 'results': [], 'has_results': False}
+        
+        try:
+            # 第一步：向量检索（召回更多候选）
+            candidates = self.vector_store.similarity_search_with_score(
+                query, 
+                k=top_k * 3  # 召回 3 倍的候选
+            )
+            
+            # 第二步：重排序
+            if use_reranking:
+                try:
+                    from sentence_transformers import CrossEncoder
+                    
+                    if not hasattr(self, 'reranker'):
+                        # 获取 HuggingFace 缓存目录的绝对路径
+                        cache_folder = str(self.models_cache.absolute())
+                        
+                        try:
+                            # 加载本地缓存的 CrossEncoder 模型
+                            # 注意：HF_HUB_OFFLINE 已在应用启动时设置为 '1'
+                            print(f"📦 从本地缓存加载 CrossEncoder 模型...")
+                            print(f"   缓存路径: {cache_folder}")
+                            
+                            self.reranker = CrossEncoder(
+                                'cross-encoder/ms-marco-MiniLM-L-6-v2',
+                                cache_folder=cache_folder
+                            )
+                            print(f"✅ 使用本地缓存的 CrossEncoder 模型成功!")
+                            
+                        except Exception as cache_error:
+                            # 如果本地缓存失败，尝试在线下载
+                            print(f"⚠️  本地缓存加载失败: {cache_error}")
+                            print("🔄 尝试从 HuggingFace 在线下载模型...")
+                            
+                            # 临时禁用离线模式以允许在线下载
+                            os.environ['HF_HUB_OFFLINE'] = '0'
+                            try:
+                                self.reranker = CrossEncoder(
+                                    'cross-encoder/ms-marco-MiniLM-L-6-v2',
+                                    cache_folder=cache_folder
+                                )
+                                print("✅ 在线下载模型成功，已保存到本地缓存")
+                                # 恢复离线模式
+                                os.environ['HF_HUB_OFFLINE'] = '1'
+                            except Exception as online_error:
+                                print(f"❌ 在线下载也失败: {online_error}")
+                                print("   使用本地缓存或降级处理")
+                                use_reranking = False  # 禁用 Re-Ranking
+                                # 恢复离线模式
+                                os.environ['HF_HUB_OFFLINE'] = '1'
+                    
+                    if use_reranking:  # 只有模型加载成功才执行重排序
+                        docs = [doc for doc, _ in candidates]
+                        
+                        # 重排序
+                        scores = self.reranker.predict([
+                            (query, doc.page_content)
+                            for doc in docs
+                        ])
+                        
+                        # 按分数重新排序
+                        candidates = sorted(
+                            zip(docs, scores),
+                            key=lambda x: x[1],
+                            reverse=True
+                        )
+                        # 转换格式
+                        candidates = [(doc, score) for doc, score in candidates]
+                        print(f"✅ 重排序完成: {len(candidates)} 个结果")
+                    
+                except Exception as e:
+                    print(f"⚠️  Re-Ranking 失败，降级到向量相似度: {e}")
+                    # 降级处理：继续使用向量相似度分数
+                    pass
+            
+            # 第三步：格式化结果（不再需要硬阈值！）
+            results = []
+            for doc, score in candidates[:top_k]:
+                results.append({
+                    'content': doc.page_content,
+                    'source': doc.metadata.get('source', 'Unknown'),
+                    'score': float(score),  # 现在是重排序分数而不是向量距离
+                })
+            
+            has_results = len(results) > 0
+            
+            print(f"✅ 重排序完成: {len(results)} 个结果")
+            for i, result in enumerate(results, 1):
+                print(f"   {i}. {result['source']} (分数: {result['score']:.3f})")
+            
+            return {
+                'question': query,
+                'results': results,
+                'has_results': has_results
+            }
+        
+        except Exception as e:
+            print(f"❌ 搜索错误: {e}")
+            return {
+                'question': query,
+                'results': [],
+                'has_results': False
+            }
+
     def query(self, question: str, top_k: int = 3) -> Dict:
         """
         查询知识库

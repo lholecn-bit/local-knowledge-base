@@ -1,11 +1,8 @@
 # backend/app.py
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-
-# 🔴 最重要：在最开始加载 .env 文件
-load_dotenv()
-
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from knowledge_base import LocalKnowledgeBase
@@ -13,10 +10,40 @@ from pathlib import Path
 import traceback
 import json
 
-# 初始化 Flask 应用
+
+# 在最开始设置离线模式，优先使用本地缓存
+# 使用绝对路径避免相对路径混乱
+# project_root = Path(__file__).parent.parent  # 项目根目录
+# models_cache_path = project_root / 'models_cache'
+
+# os.environ['HF_HUB_OFFLINE'] = '1'
+# os.environ['HF_HOME'] = str(models_cache_path.absolute())
+# os.environ['TRANSFORMERS_CACHE'] = str((models_cache_path / 'transformers').absolute())
+
+"""
+Python为脚本语言，写在前面的部分会被优先执行
+和CPP不同，Python并没有main函数的概念，所有顶层代码都会被执行
+所以，要确保初始化代码在这里执行 :load_dotenv()
+"""
+load_dotenv()
+
+"""
+Python 是 “脚本语言 + 模块语言”，一个 .py 文件既可以作为可执行脚本，也可以作为模块被其他脚本导入。例如：
+如果你在另一个文件中写 import app，此时 app.py 会被当作模块加载，全局代码（如初始化 app、kb）仍会执行，
+但 if __name__ == '__main__': 块会被跳过（因为 __name__ 此时是 app 而非 __main__）。
+这种设计让代码既能独立运行，又能被复用（作为模块提供功能），比 C++ 单一的 main 入口更灵活。
+所以，app = Flask(__name__)可以不在 main 函数中。
+"""
+# 初始化 Flask 应用 
 app = Flask(__name__)
 
-# ✅ 改进的 CORS 配置 - 支持流式响应
+"""
+ 浏览器有一个 “同源策略” 安全机制：
+ 默认情况下，只有当前端（如 http://localhost:3000）和后端（如 http://localhost:5000）的协议、域名、端口完全一致时，前端才能正常调用后端 API。
+ 如果不一致（比如端口不同），浏览器会拦截请求，导致跨域错误。
+ 你的应用中，前端地址是 http://localhost:3000，后端是 http://localhost:5000，属于跨域场景，
+ 因此必须配置 CORS 允许跨域访问。
+"""
 CORS(app, 
      resources={r"/api/*": {
          "origins": "*",
@@ -28,8 +55,8 @@ CORS(app,
      expose_headers=["Content-Type", "X-Total-Count"],
      stream=True)  # ✅ 关键！支持流式响应
 
-# 从环境变量读取配置
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+# 从环境变量读取配置 
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', '')
 
 # 初始化知识库
 print("\n" + "="*60)
@@ -46,12 +73,29 @@ except Exception as e:
     kb = None
 
 
+# 初始化 LLM 客户端
+from llm_client import LLMClient
+
+try:
+    # 初始化 LLM 客户端（全局复用）
+    llm_client = LLMClient(
+        api_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        api_key=os.getenv('OPENAI_API_KEY'),
+        model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
+    )
+    print("✅ LLM 客户端初始化成功！")
+except Exception as e:
+    print(f"❌ LLM 客户端初始化失败: {e}")
+    llm_client = None
+
+
+
 # ==================== API 端点 ====================
 
-@app.route('/api/kb/stats', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/kb/stats', methods=['GET', 'OPTIONS'])  
 def get_kb_stats():
     """获取知识库统计信息"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     if not kb:
@@ -109,12 +153,10 @@ def upload_documents():
         print("="*60 + "\n")
         return jsonify({'error': str(e)}), 500
 
-
-
-@app.route('/api/kb/search', methods=['POST', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/kb/search', methods=['POST', 'OPTIONS'])  
 def search_kb():
     """搜索知识库"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     if not kb:
@@ -135,10 +177,10 @@ def search_kb():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/kb/query', methods=['POST', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/kb/query', methods=['POST', 'OPTIONS'])  
 def query_kb():
     """查询知识库"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     if not kb:
@@ -162,15 +204,19 @@ def query_kb():
 
 @app.route('/api/stream-query', methods=['POST', 'OPTIONS'])
 def stream_query():
-    """✅ 流式查询端点 - 改进的 RAG 实现（带相关性过滤）"""
-    if request.method == 'OPTIONS':
+    """OPTIONS 是浏览器的 “跨域权限询问”，返回 204 空响应是告诉浏览器 “允许该请求”，为后续实际请求铺路。"""
+    if request.method == 'OPTIONS': 
         return '', 204
-    
+    """
+    关于return的内容:
+    HTTP 协议（IETF 制定）要求必须返回状态码，且如果有响应体，需通过 Content-Type 标识格式；
+    jsonify() 自动加 Content-Type 头、return 内容, 状态码 符合 HTTP 响应格式
+    """
     if not kb:
         return jsonify({'error': '知识库未初始化'}), 500
     
     try:
-        data = request.get_json()
+        data = request.get_json() # TODO 这个request是从哪里来的
         question = data.get('question', '')
         mode = data.get('mode', 'auto')
         top_k = data.get('top_k', 3)
@@ -183,74 +229,62 @@ def stream_query():
         
         def generate():
             try:
-                from llm_client import LLMClient
+
                 
-                llm = LLMClient(
-                    api_url=os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-                    api_key=os.getenv('OPENAI_API_KEY'),
-                    model=os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
-                )
+                # 不再重新创建，直接使用全局实例
+                if not llm_client:
+                    yield json.dumps({
+                        'type': 'error',
+                        'message': 'LLM 客户端未初始化'
+                    }) + '\n'
+                    return
                 
-                # ✅ 第一步：根据模式选择相关性阈值，然后搜索知识库
-                # 根据用户选择的模式调整阈值：
-                # - 'kb' 模式：用户更倾向于使用知识库，降低阈值以保留更多结果（0.2）
-                # - 'auto' 模式：自动选择，使用默认阈值（0.3）
-                # - 'llm' 模式：不需要搜索，但仍然搜索供显示用，使用严格阈值（0.4）
-                if mode == 'kb':
-                    relevance_threshold = 0.2  # 📚 知识库模式：更宽松，保留更多相关文档
-                    print(f"   📚 知识库模式：使用较宽松的阈值 (0.2)")
-                elif mode == 'llm':
-                    relevance_threshold = 0.4  # 🤖 LLM 模式：更严格，只显示高相关性文档
-                    print(f"   🤖 LLM 模式：使用较严格的阈值 (0.4)")
-                else:  # auto
-                    relevance_threshold = 0.3  # 自动模式：使用默认阈值
-                    print(f"   🔄 自动模式：使用默认阈值 (0.3)")
+                # 通过知识库搜索，得到相关文档
+                search_results = kb.search(question, top_k, use_reranking=True)
                 
-                search_results = kb.search(question, top_k, relevance_threshold=relevance_threshold)
-                
-                # ✅ 关键改动：只在有相关文档时才包含 sources
-                has_relevant_docs = search_results.get('has_results', False)
+                # 只在有相关文档时才包含 sources
+                has_relevant_docs = search_results.get('has_results', False) 
                 sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
                 
-                # ✅ 去重 sources
-                sources = list(dict.fromkeys(sources))
+                # 利用Python 字典键的唯一性实现去重
+                sources = list(dict.fromkeys(sources)) 
                 
-                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档（阈值: {relevance_threshold:.2%}）")
+                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
                 print(f"   📄 相关文档: {sources}")
                 print(f"   ✅ 有相关文档: {has_relevant_docs}")
                 
-                # 发送开始信号
+                # 给前端发送信号，开始进行流式传输
                 yield json.dumps({
                     'type': 'start',
                     'mode': mode,
-                    'sources': sources  # ✅ 只包含有相关性的文档
+                    'sources': sources  # 只包含有相关性的文档
                 }) + '\n'
                 
-                # ✅ 第二步：根据模式构建提示词并调用 LLM
+                # 根据模式构建提示词并调用 LLM
                 if mode == 'kb':
                     # RAG 模式：知识库 + LLM
                     if has_relevant_docs:
                         answer = _rag_query(question, search_results, llm)
-                        actual_mode = 'kb'
+                        actual_mode = 'kb' # TODO actual_mode是否可以删掉？
                     else:
                         # 知识库模式但无相关文档，直接用 LLM
-                        answer = llm.chat(question)
+                        answer = llm_client.chat(question)
                         print(f"   ⚠️  知识库模式但无相关文档，使用 LLM 直接回答")
                         actual_mode = 'llm'
                 
                 elif mode == 'llm':
                     # 直接 LLM 模式：忽略知识库
-                    answer = llm.chat(question)
+                    answer = llm_client.chat(question)
                     actual_mode = 'llm'
                 
                 elif mode == 'auto':
                     # 自动模式：有相关内容则 RAG，无则直接 LLM
                     if has_relevant_docs:
-                        answer = _rag_query(question, search_results, llm)
+                        answer = _rag_query(question, search_results, llm_client)
                         actual_mode = 'kb'
                         print(f"   🔄 自动模式：使用知识库模式回答")
                     else:
-                        answer = llm.chat(question)
+                        answer = llm_client.chat(question)
                         actual_mode = 'llm'
                         print(f"   🔄 自动模式：无相关文档，使用 LLM 模式回答")
                 
@@ -258,13 +292,13 @@ def stream_query():
                     answer = "未知的查询模式"
                     actual_mode = mode
                 
-                # ✅ 第三步：流式发送答案
+                # ✅ 流式发送答案 
                 yield json.dumps({
                     'type': 'stream',
                     'data': answer
                 }) + '\n'
                 
-                # 发送完成信号
+                # 发送完成信号 # 
                 yield json.dumps({'type': 'done'}) + '\n'
                 
                 print(f"   ✅ 查询完成\n")
@@ -293,7 +327,6 @@ def stream_query():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
 def _rag_query(question, search_results, llm):
     """
     RAG 查询：将知识库内容和问题一起发给 LLM
@@ -306,7 +339,7 @@ def _rag_query(question, search_results, llm):
     Returns:
         LLM 生成的答案
     """
-    # ✅ 格式化知识库内容
+    # 格式化知识库内容
     context_parts = []
     for doc in search_results['results']:
         context_parts.append(f"【{doc['source']}】\n{doc['content']}")
@@ -315,27 +348,25 @@ def _rag_query(question, search_results, llm):
     # ✅ 构建 RAG 提示词
     rag_prompt = f"""你是一个专业的助手。请根据以下知识库中的内容，回答用户的问题。
 
-【知识库内容】
-{context}
+        【知识库内容】
+        {context}
 
-【用户问题】
-{question}
+        【用户问题】
+        {question}
 
-请求解释：
-1. 优先使用知识库中的信息回答
-2. 如果知识库中没有相关信息，请明确说明
-3. 保持回答清晰、准确、有条理
-4. 必要时可以引用知识库的具体内容
+        请求解释：
+        1. 优先使用知识库中的信息回答
+        2. 如果知识库中没有相关信息，请明确说明
+        3. 保持回答清晰、准确、有条理
+        4. 必要时可以引用知识库的具体内容
 
-回答："""
+        回答："""
     
     # ✅ 调用 LLM
     answer = llm.chat(rag_prompt)
     return answer
 
-
-
-@app.route('/api/clear', methods=['POST', 'OPTIONS'])  # ✅ 改这里！改为 /api/clear
+@app.route('/api/clear', methods=['POST', 'OPTIONS']) 
 def clear_kb():
     """清空知识库"""
     if request.method == 'OPTIONS':
@@ -359,10 +390,10 @@ def clear_kb():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/documents/list', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/documents/list', methods=['GET', 'OPTIONS'])  
 def list_documents():
     """列出所有文档"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     if not kb:
@@ -376,10 +407,10 @@ def list_documents():
 
 
 
-@app.route('/api/documents/<filename>', methods=['DELETE', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/documents/<filename>', methods=['DELETE', 'OPTIONS'])  
 def delete_document(filename):
     """删除文档"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     if not kb:
@@ -392,10 +423,10 @@ def delete_document(filename):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/health', methods=['GET', 'OPTIONS'])  # ✅ 加 OPTIONS
+@app.route('/api/health', methods=['GET', 'OPTIONS'])  
 def health_check():
     """健康检查"""
-    if request.method == 'OPTIONS':  # ✅ 加这个
+    if request.method == 'OPTIONS':  
         return '', 204
     
     return jsonify({
@@ -420,8 +451,7 @@ if __name__ == '__main__':
     if kb:
         print("\n" + "="*60)
         print("🌐 Flask 应用启动成功！")
-        print("📍 访问地址: http://localhost:3000")
-        print("📍 前端地址: http://localhost:5000")
+        print("📍 后端地址: http://localhost:5000")
         print("="*60 + "\n")
         app.run(host='0.0.0.0', port=5000, debug=True)
     else:
