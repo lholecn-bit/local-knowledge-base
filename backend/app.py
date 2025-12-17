@@ -10,16 +10,6 @@ from pathlib import Path
 import traceback
 import json
 
-
-# 在最开始设置离线模式，优先使用本地缓存
-# 使用绝对路径避免相对路径混乱
-# project_root = Path(__file__).parent.parent  # 项目根目录
-# models_cache_path = project_root / 'models_cache'
-
-# os.environ['HF_HUB_OFFLINE'] = '1'
-# os.environ['HF_HOME'] = str(models_cache_path.absolute())
-# os.environ['TRANSFORMERS_CACHE'] = str((models_cache_path / 'transformers').absolute())
-
 """
 Python为脚本语言，写在前面的部分会被优先执行
 和CPP不同，Python并没有main函数的概念，所有顶层代码都会被执行
