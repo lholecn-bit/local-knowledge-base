@@ -220,7 +220,7 @@ def stream_query():
         def generate():
             try:
 
-                
+                print(f"开始流式查询处理...")
                 # 不再重新创建，直接使用全局实例
                 if not llm_client:
                     yield json.dumps({
@@ -228,14 +228,14 @@ def stream_query():
                         'message': 'LLM 客户端未初始化'
                     }) + '\n'
                     return
-                
+                print(f"   ✅ LLM 客户端已初始化")
                 # 通过知识库搜索，得到相关文档
                 search_results = kb.search(question, top_k, use_reranking=True)
-                
+                print(f"   ✅ 知识库搜索完成")
                 # 只在有相关文档时才包含 sources
                 has_relevant_docs = search_results.get('has_results', False) 
                 sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
-                
+                print(f"   原始相关文档: {sources}")
                 # 利用Python 字典键的唯一性实现去重
                 sources = list(dict.fromkeys(sources)) 
                 
