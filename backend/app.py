@@ -191,7 +191,6 @@ def query_kb():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/stream-query', methods=['POST', 'OPTIONS'])
 def stream_query():
     """OPTIONS 是浏览器的 “跨域权限询问”，返回 204 空响应是告诉浏览器 “允许该请求”，为后续实际请求铺路。"""
@@ -206,7 +205,7 @@ def stream_query():
         return jsonify({'error': '知识库未初始化'}), 500
     
     try:
-        data = request.get_json() # TODO 这个request是从哪里来的
+        data = request.get_json()
         question = data.get('question', '')
         mode = data.get('mode', 'auto')
         top_k = data.get('top_k', 3)
@@ -219,9 +218,8 @@ def stream_query():
         
         def generate():
             try:
-
                 print(f"开始流式查询处理...")
-                # 不再重新创建，直接使用全局实例
+                
                 if not llm_client:
                     yield json.dumps({
                         'type': 'error',
@@ -229,67 +227,96 @@ def stream_query():
                     }) + '\n'
                     return
                 print(f"   ✅ LLM 客户端已初始化")
-                # 通过知识库搜索，得到相关文档
-                search_results = kb.search(question, top_k, use_reranking=True)
-                print(f"   ✅ 知识库搜索完成")
-                # 只在有相关文档时才包含 sources
-                has_relevant_docs = search_results.get('has_results', False) 
-                sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
-                print(f"   原始相关文档: {sources}")
-                # 利用Python 字典键的唯一性实现去重
-                sources = list(dict.fromkeys(sources)) 
                 
-                print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
-                print(f"   📄 相关文档: {sources}")
-                print(f"   ✅ 有相关文档: {has_relevant_docs}")
+                # ✅ 关键改动：根据 mode 决定是否搜索
+                sources = []
+                actual_mode = mode
                 
-                # 给前端发送信号，开始进行流式传输
-                yield json.dumps({
-                    'type': 'start',
-                    'mode': mode,
-                    'sources': sources  # 只包含有相关性的文档
-                }) + '\n'
-                
-                # 根据模式构建提示词并调用 LLM
-                if mode == 'kb':
-                    # RAG 模式：知识库 + LLM
-                    if has_relevant_docs:
-                        answer = _rag_query(question, search_results, llm)
-                        actual_mode = 'kb' # TODO actual_mode是否可以删掉？
-                    else:
-                        # 知识库模式但无相关文档，直接用 LLM
-                        answer = llm_client.chat(question)
-                        print(f"   ⚠️  知识库模式但无相关文档，使用 LLM 直接回答")
-                        actual_mode = 'llm'
-                
-                elif mode == 'llm':
-                    # 直接 LLM 模式：忽略知识库
+                if mode == 'llm':
+                    # ✅ 优化：LLM 模式下不搜索知识库
+                    print(f"   📋 模式: 直接 LLM，跳过知识库搜索")
+                    yield json.dumps({
+                        'type': 'start',
+                        'mode': mode,
+                        'sources': []
+                    }) + '\n'
+                    
                     answer = llm_client.chat(question)
                     actual_mode = 'llm'
                 
-                elif mode == 'auto':
-                    # 自动模式：有相关内容则 RAG，无则直接 LLM
+                elif mode == 'kb':
+                    # ✅ 知识库模式：必须搜索
+                    print(f"   📚 模式: 知识库")
+                    search_results = kb.search(question, top_k, use_reranking=True)
+                    has_relevant_docs = search_results.get('has_results', False)
+                    sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
+                    sources = list(dict.fromkeys(sources))  # 去重
+                    
+                    print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
+                    print(f"   📄 相关文档: {sources}")
+                    
+                    yield json.dumps({
+                        'type': 'start',
+                        'mode': mode,
+                        'sources': sources
+                    }) + '\n'
+                    
                     if has_relevant_docs:
                         answer = _rag_query(question, search_results, llm_client)
                         actual_mode = 'kb'
-                        print(f"   🔄 自动模式：使用知识库模式回答")
+                        print(f"   ✅ 知识库 RAG 模式")
                     else:
                         answer = llm_client.chat(question)
                         actual_mode = 'llm'
-                        print(f"   🔄 自动模式：无相关文档，使用 LLM 模式回答")
+                        print(f"   ⚠️  知识库无相关文档，降级到 LLM")
+                
+                elif mode == 'auto':
+                    # ✅ 自动模式：先搜索再判断
+                    print(f"   🔄 模式: 自动")
+                    search_results = kb.search(question, top_k, use_reranking=True)
+                    has_relevant_docs = search_results.get('has_results', False)
+                    sources = [doc['source'] for doc in search_results['results']] if has_relevant_docs else []
+                    sources = list(dict.fromkeys(sources))  # 去重
+                    
+                    print(f"   📊 搜索结果: {len(search_results['results'])} 个文档")
+                    print(f"   📄 相关文档: {sources}")
+                    print(f"   ✅ 有相关文档: {has_relevant_docs}")
+                    
+                    yield json.dumps({
+                        'type': 'start',
+                        'mode': mode,
+                        'sources': sources
+                    }) + '\n'
+                    
+                    if has_relevant_docs:
+                        answer = _rag_query(question, search_results, llm_client)
+                        actual_mode = 'kb'
+                        print(f"   🔄 自动模式：有相关文档，使用 RAG")
+                    else:
+                        answer = llm_client.chat(question)
+                        actual_mode = 'llm'
+                        print(f"   🔄 自动模式：无相关文档，使用纯 LLM")
                 
                 else:
                     answer = "未知的查询模式"
                     actual_mode = mode
+                    yield json.dumps({
+                        'type': 'start',
+                        'mode': mode,
+                        'sources': []
+                    }) + '\n'
                 
                 # ✅ 流式发送答案 
                 yield json.dumps({
                     'type': 'stream',
-                    'data': answer
+                    'data': answer,
+                    'actual_mode': actual_mode
                 }) + '\n'
                 
-                # 发送完成信号 # 
-                yield json.dumps({'type': 'done'}) + '\n'
+                yield json.dumps({
+                    'type': 'done',
+                    'actual_mode': actual_mode
+                }) + '\n'
                 
                 print(f"   ✅ 查询完成\n")
             
@@ -316,6 +343,7 @@ def stream_query():
         print(f"❌ 流式查询失败: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 
 def _rag_query(question, search_results, llm):
     """
