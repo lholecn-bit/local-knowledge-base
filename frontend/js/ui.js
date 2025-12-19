@@ -169,27 +169,6 @@ constructor() {
         }
     }
 
-    // /**
-    //  * 延迟高亮（防止频繁重排）
-    //  */
-    // _scheduleHighlight(element) {
-    //     if (this._highlightTimeout) {
-    //         clearTimeout(this._highlightTimeout);
-    //     }
-        
-    //     this._highlightTimeout = setTimeout(() => {
-    //         // ✅ 现在才转换 Markdown 为 HTML
-    //         const text = element.textContent;
-    //         element.innerHTML = this.markdownToHtml(text);
-            
-    //         // ✅ 然后高亮代码块
-    //         this._highlightCode(element);
-            
-    //         this._highlightTimeout = null;
-    //     }, 300);  // 300ms 延迟，等待流数据稳定
-    // }
-
-
     showSources(sources) {
         if (!this.currentMessageEl) return;
         if (!sources || sources.length === 0) return;
@@ -220,7 +199,7 @@ constructor() {
             if (!filename || seenFilenames.has(filename)) continue;
             
             seenFilenames.add(filename);
-            sourcesList.push(`<li>📄 ${this.escapeHtml(filename)}</li>`);
+            sourcesList.push(`<li> ${this.escapeHtml(filename)}</li>`);
         }
         
         if (sourcesList.length === 0) return '';
@@ -491,6 +470,4 @@ constructor() {
             return this.escapeHtml(text).replace(/\n/g, '<br>');
         }
     }
-
-
 }
