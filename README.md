@@ -37,7 +37,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/local-knowledge-base.git
+git clone https://github.com/lholecn-bit/local-knowledge-base.git
 cd local-knowledge-base
 
 # 创建虚拟环境（推荐）
@@ -618,9 +618,9 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ## 📞 联系和支持
 
-- 📧 Email: your-email@example.com
-- 🐛 Bug Report: [GitHub Issues](https://github.com/yourusername/local-knowledge-base/issues)
-- 💬 讨论: [GitHub Discussions](https://github.com/yourusername/local-knowledge-base/discussions)
+- 📧 Email: lholecn@gmail.com
+- 🐛 Bug Report: [GitHub Issues](https://github.com/lholecn-bit/local-knowledge-base/issues)
+- 💬 讨论: [GitHub Discussions](https://github.com/lholecn-bit/local-knowledge-base/discussions)
 
 ---
 
