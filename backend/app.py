@@ -452,6 +452,141 @@ def health_check():
         'kb_initialized': kb is not None
     }), 200
 
+@app.route('/api/documents/upload-with-progress', methods=['POST', 'OPTIONS'])
+def upload_documents_with_progress():
+    """上传文档 - 带进度条"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    if not kb:
+        return jsonify({'error': '知识库未初始化'}), 500
+    
+    try:
+        # 检查是否有文件,如果没有文件，返回错误信息
+        files = request.files.getlist('files')
+        
+        if not files or all(f.filename == '' for f in files):
+            return jsonify({'error': '文件列表为空'}), 400
+        
+        # 先读取所有文件内容到内存，而不是等到生成器中才读
+        file_data = []  # 存储 (filename, content) 元组
+        
+        for idx, file in enumerate(files):
+            try:
+                # 立即读取文件内容（此时文件对象还是有效的）
+                content = file.read()
+                filename = file.filename
+                file_data.append((filename, content))
+                print(f"  ✅ 已读取文件: {filename} ({len(content)} bytes)")
+            except Exception as e:
+                error_msg = f'读取文件 {file.filename} 失败: {str(e)}'
+                print(f"  ❌ {error_msg}")
+                return jsonify({'error': error_msg}), 400
+        
+        # 现在生成器只需处理已在内存中的文件
+        def generate():
+            # 从内存中处理文件
+            temp_files = []
+            total_files = len(file_data)
+            
+            # ======== 第一步：保存文件到磁盘 ========
+            print(f"\n📤 开始上传，共 {total_files} 个文件")
+            
+            try:
+                for idx, (filename, content) in enumerate(file_data):
+                    try:
+                        # 保存文件到临时目录
+                        uploads_dir = Path('./uploads')
+                        uploads_dir.mkdir(parents=True, exist_ok=True) # 确保目录存在，如果不存在则创建
+                        
+                        # 使用二进制写入
+                        temp_path = uploads_dir / f"{idx}_{filename}"
+                        with open(str(temp_path), 'wb') as f:
+                            f.write(content)
+                        
+                        temp_files.append(str(temp_path))
+                        
+                        # 📤 发送进度：文件保存完成 
+                        # process计算原理： 已保存文件数 / 总文件数 * 20
+                        # 这里假设保存文件阶段占总进度的前20%
+                        # process 范围：0-20，超过20由后续处理文档阶段负责
+                        progress = int((idx + 1) / total_files * 20) 
+                        message = f'已保存文件 {idx+1}/{total_files}: {filename}'
+                        
+                        print(f"  ✅ {message}")
+                        
+                        yield json.dumps({
+                            'type': 'progress', # 进度类型
+                            'stage': 'saving_files', # 阶段：保存文件
+                            'progress': progress, # 进度百分比
+                            'message': message # 进度信息
+                        }) + '\n'
+                        
+                    except Exception as e:
+                        error_msg = f'保存文件 {filename} 失败: {str(e)}'
+                        print(f"  ❌ {error_msg}")
+                        
+                        yield json.dumps({
+                            'type': 'error',
+                            'message': error_msg
+                        }) + '\n'
+                        return
+                
+                # ======== 第二步：处理文档（向量化） ========
+                print(f"\n📚 开始处理文档...")
+                
+                try:
+                    # 调用 knowledge_base 添加文档
+                    result = kb.add_documents(temp_files)
+                    
+                    # 📤 发送完成前的最后进度，进度条process的进度为99%
+                    yield json.dumps({
+                        'type': 'progress',
+                        'stage': 'saving_index',
+                        'progress': 99,
+                        'message': '保存索引中...'
+                    }) + '\n'
+                    
+                    # 📤 发送最终结果，进度条process的进度为100%
+                    yield json.dumps({
+                        'type': 'complete',
+                        'progress': 100,
+                        'added_chunks': result['added_chunks'],
+                        'files': result['files'],
+                        'errors': result['errors']
+                    }) + '\n'
+                    
+                    print(f"✅ 上传完成！共添加 {result['added_chunks']} 个 chunks\n")
+                    
+                except Exception as e:
+                    error_msg = f'处理文档失败: {str(e)}'
+                    print(f"❌ {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    yield json.dumps({
+                        'type': 'error',
+                        'message': error_msg
+                    }) + '\n'
+            
+            finally:
+                # ✅ 清理临时文件
+                print(f"\n🧹 清理临时文件...")
+                for temp_file in temp_files:
+                    try:
+                        Path(temp_file).unlink()
+                        print(f"  🗑️ 已删除: {Path(temp_file).name}")
+                    except Exception as e:
+                        print(f"  ⚠️ 删除失败: {e}")
+        
+        return Response(generate(), mimetype='application/x-ndjson')
+    
+    except Exception as e:
+        print(f"❌ 上传端点错误: {e}\n")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 # ==================== 错误处理 ====================
 

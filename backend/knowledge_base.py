@@ -28,7 +28,7 @@ os.environ['TRANSFORMERS_CACHE'] = str((models_cache_path / 'transformers').abso
 
 try:
     from langchain_community.document_loaders import PDFPlumberLoader, TextLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter  # ✅ 改这里
     from langchain_openai import OpenAIEmbeddings
     from langchain_community.vectorstores import FAISS
     LANGCHAIN_AVAILABLE = True
@@ -156,6 +156,14 @@ class LocalKnowledgeBase:
         except Exception as e:
             print(f"错误：无法保存元数据: {e}")
     
+    def _clean_filename(self, filename: str) -> str:
+        """清理文件名前缀（去掉如 '0_' 或 '123_' 的前缀）"""
+        if '_' in filename:
+            parts = filename.split('_', 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                return parts[1]
+        return filename
+    
     def load_vector_store(self):
         """加载向量数据库"""
         faiss_path = self.db_path / "faiss_index"
@@ -187,9 +195,10 @@ class LocalKnowledgeBase:
             print(f"❌ 向量库保存失败: {e}")
             return False
     
-    def add_documents(self, file_paths: List[str]) -> Dict:
+    def add_documents(self, file_paths: List[str], progress_callback=None) -> Dict:
+        """添加文档 - 支持进度回调"""
         print(f"\n📂 开始处理 {len(file_paths)} 个文件...")
-        """添加文档到知识库"""
+        
         if not self.embeddings:
             return {
                 'added_chunks': 0,
@@ -199,85 +208,124 @@ class LocalKnowledgeBase:
         
         all_documents = []
         processed_files = {}
+        added_chunks = 0
         errors = []
+        total_files = len(file_paths)
         
-        print(f"\n📂 开始处理 {len(file_paths)} 个文件...")
-        
-        for file_path in file_paths:
-            path = Path(file_path)
-            
-            if path.is_file():
-                docs, error = self._load_file(path)
+        # 第一步：加载所有文档
+        print("\n📖 第一步：加载文档...")
+        for idx, file_path in enumerate(file_paths):
+            try:
+                docs, error = self._load_file(Path(file_path))
                 if error:
                     errors.append(error)
                 else:
                     all_documents.extend(docs)
-                    processed_files[str(path)] = len(docs)
-            elif path.is_dir():
-                for ext in ['*.pdf', '*.txt', '*.md']:
-                    for file_path in path.glob(f"**/{ext}"):
-                        docs, error = self._load_file(file_path)
-                        if error:
-                            errors.append(error)
-                        else:
-                            all_documents.extend(docs)
-                            processed_files[str(file_path)] = len(docs)
+                    processed_files[file_path] = len(docs)
+                    
+                    # 📤 发送加载进度（0-40%）
+                    progress = int((idx + 1) / total_files * 40)
+                    if progress_callback:
+                        progress_callback('loading', progress)
+            
+            except Exception as e:
+                print(f"❌ 加载文件失败: {file_path}, {e}")
+                errors.append({'file': str(file_path), 'error': str(e)})
         
         if not all_documents:
+            print("⚠️ 没有有效的文档")
             return {
                 'added_chunks': 0,
                 'files': [],
                 'errors': errors
             }
         
-        # 分割文本
-        print(f"✂️ 分割 {len(all_documents)} 个文档...")
-        chunks = self._split_documents(all_documents)
-        added_chunks = len(chunks)
-        print(f"✅ 分割完成: {added_chunks} 个块")
+        # 第二步：分割文档
+        print("\n✂️ 第二步：分割文档...")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap
+        )
+        split_docs = splitter.split_documents(all_documents)
+        print(f"✅ 分割完成，共 {len(split_docs)} 个 chunks")
         
-        # 添加到向量数据库
+        # 📤 发送分割进度（40-60%）
+        if progress_callback:
+            progress_callback('splitting', 60)
+        
+        # 第三步：生成向量（这是最耗时的步骤）
+        print("\n🔢 第三步：生成向量（这可能需要一些时间）...")
+        total_chunks = len(split_docs)
+        
         try:
-            if self.vector_store is None:
-                print(f"🆕 创建新向量库...")
-                self.vector_store = FAISS.from_documents(chunks, self.embeddings)
-            else:
-                print(f"➕ 向现有向量库添加文档...")
-                self.vector_store.add_documents(chunks)
+            # 批量处理 chunks，每批 10 个
+            batch_size = 10
+            for batch_idx in range(0, len(split_docs), batch_size):
+                batch = split_docs[batch_idx:batch_idx + batch_size]
+                
+                try:
+                    if self.vector_store is None:
+                        # 第一批：创建向量库
+                        self.vector_store = FAISS.from_documents(batch, self.embeddings)
+                    else:
+                        # 后续批：添加到现有向量库
+                        self.vector_store.add_documents(batch)
+                    
+                    added_chunks += len(batch)
+                    
+                    # 📤 发送向量化进度（60-95%）
+                    progress = 60 + int((batch_idx + len(batch)) / total_chunks * 35)
+                    if progress_callback:
+                        progress_callback('vectorizing', min(progress, 95))
+                    
+                    print(f"✅ 处理了 {added_chunks}/{total_chunks} chunks")
+                
+                except Exception as e:
+                    print(f"❌ 向量化失败: {e}")
+                    errors.append({'error': f'向量化失败: {e}'})
+                    return {
+                        'added_chunks': added_chunks,
+                        'files': list(processed_files.keys()),
+                        'errors': errors
+                    }
             
-            print(f"✅ 向量库更新成功: 现在共 {self.vector_store.index.ntotal} 个向量")
-            
-            # 保存向量库
+            # 第四步：保存向量库
+            print("\n💾 第四步：保存向量库...")
             self.save_vector_store()
+            
+            # 📤 发送保存进度（95-100%）
+            if progress_callback:
+                progress_callback('saving', 100)
+            
+            # 更新元数据
+            for file_path, doc_count in processed_files.items():
+                file_name = self._clean_filename(Path(file_path).name)
+                self.file_metadata[file_name] = {
+                    'path': file_path,
+                    'hash': self._calculate_file_hash(file_path),
+                    'added_time': datetime.now().isoformat(),
+                    'doc_count': doc_count
+                }
+            
+            self._save_metadata()
+            
+            print(f"✅ 完成！共添加 {added_chunks} 个 chunks\n")
+            
+            return {
+                'added_chunks': added_chunks,
+                'files': list(processed_files.keys()),
+                'errors': errors
+            }
+        
         except Exception as e:
-            print(f"❌ 添加到向量库失败: {e}")
+            print(f"❌ 处理失败: {e}")
             import traceback
             traceback.print_exc()
             return {
-                'added_chunks': 0,
-                'files': [],
-                'errors': [{'error': f'向量库操作失败: {e}'}]
+                'added_chunks': added_chunks,
+                'files': list(processed_files.keys()),
+                'errors': [{'error': f'处理失败: {e}'}]
             }
-        
-        # 更新元数据
-        for file_path, doc_count in processed_files.items():
-            file_name = Path(file_path).name
-            self.file_metadata[file_name] = {
-                'path': file_path,
-                'hash': self._calculate_file_hash(file_path),
-                'added_time': datetime.now().isoformat(),
-                'doc_count': doc_count,
-                'chunks': added_chunks
-            }
-        
-        self._save_metadata()
-        print(f"💾 元数据已保存\n")
-        
-        return {
-            'added_chunks': added_chunks,
-            'files': list(processed_files.keys()),
-            'errors': errors
-        }
     
     def _load_file(self, file_path: Path) -> tuple:
         """加载单个文件"""
@@ -292,7 +340,7 @@ class LocalKnowledgeBase:
                 return [], {'file': str(file_path), 'error': f'不支持的格式: {file_path.suffix}'}
             
             for doc in docs:
-                doc.metadata['source'] = file_path.name
+                doc.metadata['source'] = self._clean_filename(file_path.name)
             
             print(f"  ✅ {file_path.name}: {len(docs)} 个文档")
             return docs, None

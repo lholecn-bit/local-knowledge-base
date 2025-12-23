@@ -153,20 +153,69 @@ class App {
 
 
     async handleFileUpload(files) {
-        if (files.length === 0) return;
+        // 检查文件是否选择
+        if (!files || files.length === 0) {
+            this.ui.showNotification('请选择文件', 'warning'); // 弹窗提示
+            return;
+        }
 
-        this.ui.showLoading('上传中...');
+        // 调用 UI 层的方法，显示上传进度条
+        this.ui.showUploadProgress();
+        
         try {
-            const result = await this.api.uploadFiles(files);
-            this.ui.hideLoading();
+            /*使用 API 层的方法，注册进度回调
+            * 
+            * await 表示等待异步操作完成
+            * 
+            * uploadFilesWithProgress 是 API 层的方法，接受文件数组和进度回调函数
+            * 
+            * 进度回调函数接受一个 progressData 对象作为参数
+            * 
+            * progressData表示一个包含上传进度信息的对象，例如：
+            * {
+            *   stage: "uploading", // 上传阶段，例如 "uploading"、"processing" 等
+            *   progress: 50, // 上传进度，0-100
+            *   message: "正在上传文件..." // 上传阶段的描述信息
+            * }
+            * 
+            * result 是上传完成后的结果，例如：
+            * {
+            *   added_chunks: 123, // 添加的chunks数量
+            *   other_info: "其他信息"
+            * }
+            */
+            const result = await this.api.uploadFilesWithProgress(
+                files,
+                (progressData) => {
+                    // 这里处理进度更新
+                    console.log(`📊 ${progressData.stage}: ${progressData.progress}%`);
+                    this.ui.updateUploadProgress(
+                        progressData.progress,
+                        progressData.message
+                    );
+                }
+            );
+
+            // 上传完成, 隐藏上传进度条
+            this.ui.hideUploadProgress();
+            
+            // ✅ 检查 result 是否有效
+            if (!result) {
+                throw new Error('上传结果无效');
+            }
+
             this.ui.showNotification(
-                `✓ 成功上传 ${result.added_chunks} 个文本块`,
+                `✅ 成功上传！已添加 ${result.added_chunks} 个chunks`,
                 'success'
             );
+            
+            // 刷新统计
             await this.loadStats();
+
         } catch (error) {
-            this.ui.hideLoading();
-            this.ui.showNotification('上传失败: ' + error.message, 'error');
+            console.error('❌ 上传失败:', error);
+            this.ui.hideUploadProgress();
+            this.ui.showNotification('❌ 上传失败: ' + error.message, 'error');
         }
     }
 

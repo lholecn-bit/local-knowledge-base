@@ -470,4 +470,57 @@ constructor() {
             return this.escapeHtml(text).replace(/\n/g, '<br>');
         }
     }
+
+    /*
+    * 显示上传进度条
+    */
+    showUploadProgress() {
+        // 显示进度条容器
+        const progressDiv = document.createElement('div');
+        progressDiv.id = 'uploadProgressContainer';
+        progressDiv.className = 'upload-progress-container';
+        progressDiv.innerHTML = `
+            <div class="progress-card">
+                <h3>📤 上传进度</h3>
+                <div class="progress-bar-container">
+                    <div id="uploadProgressBar" class="progress-bar">
+                        <div class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <span id="uploadProgressText">0%</span>
+                </div>
+                <p id="uploadMessage">准备上传...</p>
+            </div>
+        `;
+        
+        this.chatHistory.parentElement.appendChild(progressDiv);
+    }
+
+    /*
+    * 更新上传进度条
+    */
+    updateUploadProgress(progress, message) {
+        const progressBar = document.getElementById('uploadProgressBar');
+        const progressText = document.getElementById('uploadProgressText');
+        const progressMessage = document.getElementById('uploadMessage');
+        
+        if (progressBar) {
+            const fill = progressBar.querySelector('.progress-fill');
+            fill.style.width = progress + '%';
+            progressText.textContent = progress + '%';
+        }
+        
+        if (progressMessage && message) {
+            progressMessage.textContent = message;
+        }
+    }
+
+    /*
+    * 隐藏上传进度条
+    */
+    hideUploadProgress() {
+        const container = document.getElementById('uploadProgressContainer');
+        if (container) {
+            container.remove();
+        }
+    }
 }
