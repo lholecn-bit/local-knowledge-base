@@ -10,6 +10,7 @@ class App {
     init() {
         this.bindEvents();
         this.loadStats();
+        this.initDocMgmt();
     }
 
     bindEvents() {
@@ -18,9 +19,148 @@ class App {
         this.ui.bindClearKBButton(() => this.handleClearKB());
         this.ui.bindRefreshStatsButton(() => this.loadStats());
         this.ui.bindDocumentDelete((filename) => this.handleDeleteDocument(filename));
-        
         // 绑定模式改变事件
         this.ui.bindModeChange((mode) => this.setMode(mode));
+    }
+
+    /**
+     * 文档管理模块初始化
+     */
+    initDocMgmt() {
+        if (!this.ui.docMgmtPanel) return;
+        // 加载文档列表
+        this.loadDocMgmtList();
+        // 刷新按钮
+        if (this.ui.docRefreshBtn) {
+            this.ui.docRefreshBtn.addEventListener('click', () => this.loadDocMgmtList());
+        }
+        // 搜索
+        if (this.ui.docSearchInput) {
+            this.ui.docSearchInput.addEventListener('input', () => this.filterDocMgmtTable());
+        }
+        // 批量删除
+        if (this.ui.docBatchDeleteBtn) {
+            this.ui.docBatchDeleteBtn.addEventListener('click', () => this.handleBatchDeleteDocs());
+        }
+        // 全选
+        if (this.ui.docSelectAll) {
+            this.ui.docSelectAll.addEventListener('change', (e) => this.toggleSelectAllDocs(e.target.checked));
+        }
+        // 表格事件委托（详情/删除）
+        if (this.ui.docMgmtTableBody) {
+            this.ui.docMgmtTableBody.addEventListener('click', (e) => this.handleDocMgmtTableClick(e));
+        }
+        // 自动轮询：当文档管理面板可见时每 10 秒刷新一次列表
+        this._docMgmtPoll = setInterval(() => {
+            try {
+                if (this.ui.docMgmtPanel && this.ui.docMgmtPanel.style.display !== 'none') {
+                    this.loadDocMgmtList();
+                }
+            } catch (e) {
+                console.debug('docMgmt poll error', e);
+            }
+        }, 10000);
+        // 绑定详情中的重建索引回调
+        this.ui.bindReindexDocument(async (filename) => {
+            if (!filename) return;
+            try {
+                this.ui.showLoading('重建索引中...');
+                const res = await this.api.request('POST', `/documents/${encodeURIComponent(filename)}/reindex`);
+                this.ui.hideLoading();
+                if (res && res.message) {
+                    this.ui.showNotification(res.message, 'success');
+                    await this.loadStats();
+                    await this.loadDocMgmtList();
+                } else {
+                    this.ui.showNotification('重建索引响应异常', 'error');
+                }
+            } catch (err) {
+                this.ui.hideLoading();
+                this.ui.showNotification('重建失败: ' + err.message, 'error');
+            }
+        });
+    }
+
+    async loadDocMgmtList() {
+        try {
+            const res = await this.api.listDocuments();
+            // 后端返回 { files: [...] }
+            this._docMgmtFiles = res.files || [];
+            this.ui.renderDocMgmtTable(this._docMgmtFiles);
+        } catch (err) {
+            this.ui.renderDocMgmtTable([]);
+            this.ui.showNotification('加载文档列表失败: ' + err.message, 'error');
+        }
+    }
+
+    filterDocMgmtTable() {
+        const keyword = this.ui.docSearchInput.value.trim().toLowerCase();
+        if (!keyword) {
+            this.ui.renderDocMgmtTable(this._docMgmtFiles || []);
+            return;
+        }
+        const filtered = (this._docMgmtFiles || []).filter(f => f.name && f.name.toLowerCase().includes(keyword));
+        this.ui.renderDocMgmtTable(filtered);
+    }
+
+    toggleSelectAllDocs(checked) {
+        const checkboxes = this.ui.docMgmtTableBody.querySelectorAll('.doc-select');
+        checkboxes.forEach(cb => { cb.checked = checked; });
+    }
+
+    async handleBatchDeleteDocs() {
+        const selected = Array.from(this.ui.docMgmtTableBody.querySelectorAll('.doc-select:checked'))
+            .map(cb => cb.dataset.filename);
+        if (selected.length === 0) {
+            this.ui.showNotification('请先选择要删除的文档', 'warning');
+            return;
+        }
+        this.ui.showConfirmModal(`确定要批量删除 ${selected.length} 个文档吗？`, async (confirmed) => {
+            if (!confirmed) return;
+            let success = 0, fail = 0;
+            for (const name of selected) {
+                try {
+                    await this.api.deleteDocument(name);
+                    success++;
+                } catch {
+                    fail++;
+                }
+            }
+            this.ui.showNotification(`批量删除完成，成功${success}，失败${fail}`,'info');
+            await this.loadDocMgmtList();
+        });
+    }
+
+    async handleDocMgmtTableClick(e) {
+        const target = e.target;
+        if (target.classList.contains('doc-delete-btn')) {
+            const filename = target.dataset.filename;
+            if (!filename) return;
+            this.ui.showConfirmModal(`确定要删除文档 "${filename}" 吗？`, async (confirmed) => {
+                if (!confirmed) return;
+                try {
+                    await this.api.deleteDocument(filename);
+                    this.ui.showNotification('✓ 文档已删除', 'success');
+                    await this.loadDocMgmtList();
+                } catch (err) {
+                    this.ui.showNotification('删除失败: ' + err.message, 'error');
+                }
+            });
+        } else if (target.classList.contains('doc-detail-btn')) {
+            const filename = target.dataset.filename;
+            if (!filename) return;
+
+            try {
+                const res = await this.api.request('GET', `/documents/${encodeURIComponent(filename)}/detail`);
+                if (res && res.file) {
+                    this.ui.showDocumentDetail(res.file);
+                } else {
+                    this.ui.showNotification('获取详情失败', 'error');
+                }
+            } catch (err) {
+                this.ui.showNotification('获取详情失败: ' + err.message, 'error');
+            }
+        }
     }
 
     async handleQuery() {

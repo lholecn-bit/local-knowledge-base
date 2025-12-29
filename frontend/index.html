@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>本地知识库系统</title>
     <link rel="stylesheet" href="css/style.css">
+    <!-- 引入 Bootstrap 快速美化样式（无需框架重构即可改善外观） -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <!-- Highlight.js 代码高亮库 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css">
         <!-- ✅ 加入 marked.js Markdown 渲染库 -->
@@ -126,9 +128,18 @@
     <div class="container">
         <!-- 侧边栏 -->
         <aside class="sidebar">
+
             <div class="sidebar-header">
                 <h1>📚 知识库</h1>
             </div>
+
+            <!-- 侧边栏导航 -->
+            <nav class="sidebar-nav">
+                <ul>
+                    <li><a href="#" id="navChat" class="nav-link active">问答检索</a></li>
+                    <li><a href="#" id="navDocMgmt" class="nav-link">文档管理</a></li>
+                </ul>
+            </nav>
 
             <!-- 统计信息 -->
             <div class="stats-card">
@@ -186,8 +197,8 @@
 
         <!-- 主内容区域 -->
         <main class="main-content">
-            <!-- 对话区域 -->
-            <div class="chat-container">
+            <!-- 对话检索区（默认显示） -->
+            <div class="chat-container" id="chatPanel">
                 <div class="chat-history" id="chatHistory">
                     <div class="welcome-message">
                         <h2>👋 欢迎使用知识库系统</h2>
@@ -249,6 +260,35 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 文档管理区（默认隐藏） -->
+            <div class="doc-mgmt-container" id="docMgmtPanel" style="display:none;">
+                <h2>📄 文档管理</h2>
+                <div class="doc-mgmt-toolbar">
+                    <input type="text" id="docSearchInput" placeholder="搜索文档..." />
+                    <button id="docRefreshBtn" class="btn btn-primary">🔄 刷新</button>
+                    <button id="docBatchDeleteBtn" class="btn btn-danger">🗑️ 批量删除</button>
+                </div>
+                <div class="doc-mgmt-table-wrapper">
+                    <table class="doc-mgmt-table table table-striped table-hover" id="docMgmtTable">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="docSelectAll"></th>
+                                <th>文件名</th>
+                                <th>类型</th>
+                                <th>大小</th>
+                                <th>上传时间</th>
+                                <th>分块数</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="docMgmtTableBody">
+                            <!-- 文档行 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -266,6 +306,20 @@
             <div class="modal-buttons">
                 <button id="confirmYesBtn" class="btn btn-danger">确认</button>
                 <button id="confirmNoBtn" class="btn btn-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：文档详情 -->
+    <div class="modal" id="docDetailModal" style="display:none;">
+        <div class="modal-content" id="docDetailContent">
+            <h3 id="docDetailTitle">文档详情</h3>
+            <div id="docDetailBody">
+                <!-- 动态填充 -->
+            </div>
+            <div class="modal-buttons">
+                <button id="docReindexBtn" class="btn btn-primary">重建索引</button>
+                <button id="docCloseBtn" class="btn btn-secondary">关闭</button>
             </div>
         </div>
     </div>

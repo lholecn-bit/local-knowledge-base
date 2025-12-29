@@ -1,16 +1,19 @@
 // frontend/js/ui.js
 class UI {
 constructor() {
+        // 聊天/问答区
         this.chatHistory = document.getElementById('chatHistory');
         this.questionInput = document.getElementById('questionInput');
         this.sendBtn = document.getElementById('sendBtn');
         this.stopBtn = document.getElementById('stopBtn');
+        // 文档上传/列表（侧边栏）
         this.fileInput = document.getElementById('fileInput');
         this.documentsList = document.getElementById('documentsList');
         this.totalChunksEl = document.getElementById('totalChunks');
         this.dbStatusEl = document.getElementById('dbStatus');
         this.clearKbBtn = document.getElementById('clearKbBtn');
         this.refreshStatsBtn = document.getElementById('refreshStatsBtn');
+        // 公共
         this.loadingOverlay = document.getElementById('loadingOverlay');
         this.loadingText = document.getElementById('loadingText');
         this.confirmModal = document.getElementById('confirmModal');
@@ -21,16 +24,111 @@ constructor() {
         this.uploadProgress = document.getElementById('uploadProgress');
         this.progressFill = document.getElementById('progressFill');
         this.progressText = document.getElementById('progressText');
-        
+        // 文档管理区
+        this.navChat = document.getElementById('navChat');
+        this.navDocMgmt = document.getElementById('navDocMgmt');
+        this.chatPanel = document.getElementById('chatPanel');
+        this.docMgmtPanel = document.getElementById('docMgmtPanel');
+        this.docSearchInput = document.getElementById('docSearchInput');
+        this.docRefreshBtn = document.getElementById('docRefreshBtn');
+        this.docBatchDeleteBtn = document.getElementById('docBatchDeleteBtn');
+        this.docMgmtTable = document.getElementById('docMgmtTable');
+        this.docMgmtTableBody = document.getElementById('docMgmtTableBody');
+        this.docSelectAll = document.getElementById('docSelectAll');
+
         this.isLoading = false;
         this.abortController = null;
         this.currentMessageEl = null;
         this.onModeChange = null; // 添加模式改变回调
-        this._highlightTimeout = null;  // ✅ 加这一行
-        
+        this._highlightTimeout = null;
+
         // 初始化模式选择器事件
         this._initModeSelector();
+        // 初始化导航切换
+        this._initNavSwitch();
     }
+
+    /**
+     * 初始化侧边栏导航切换
+     */
+    _initNavSwitch() {
+        if (this.navChat && this.navDocMgmt && this.chatPanel && this.docMgmtPanel) {
+            this.navChat.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.showChatPanel();
+            });
+            this.navDocMgmt.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.showDocMgmtPanel();
+            });
+        }
+    }
+
+    showChatPanel() {
+        this.chatPanel.style.display = '';
+        this.docMgmtPanel.style.display = 'none';
+        this.navChat.classList.add('active');
+        this.navDocMgmt.classList.remove('active');
+    }
+
+    showDocMgmtPanel() {
+        this.chatPanel.style.display = 'none';
+        this.docMgmtPanel.style.display = '';
+        this.navChat.classList.remove('active');
+        this.navDocMgmt.classList.add('active');
+    }
+
+    /**
+     * 渲染文档管理表格
+     * @param {Array} files - 文档数组，含元数据
+     */
+    renderDocMgmtTable(files) {
+        if (!Array.isArray(files) || files.length === 0) {
+            this.docMgmtTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#888;">暂无文档</td></tr>';
+            return;
+        }
+        let html = '';
+        for (const file of files) {
+            html += `
+                <tr>
+                    <td><input type="checkbox" class="doc-select" data-filename="${this.escapeHtml(file.name)}"></td>
+                    <td class="doc-name">${this.escapeHtml(file.name)}</td>
+                    <td>${this.escapeHtml(file.type || (file.name && file.name.split('.').pop().toUpperCase()) || '')}</td>
+                    <td>${file.size ? this._formatSize(file.size) : '-'}</td>
+                    <td>${file.upload_time ? this._formatTime(file.upload_time) : '-'}</td>
+                    <td>${file.chunks ?? '-'}</td>
+                    <td>${file.status ?? '已索引'}</td>
+                    <td>
+                        <button class="btn btn-sm btn-info doc-detail-btn" data-filename="${this.escapeHtml(file.name)}">详情</button>
+                        <button class="btn btn-sm btn-danger doc-delete-btn" data-filename="${this.escapeHtml(file.name)}">删除</button>
+                    </td>
+                </tr>
+            `;
+        }
+        this.docMgmtTableBody.innerHTML = html;
+    }
+
+    /**
+     * 工具：格式化文件大小
+     */
+    _formatSize(size) {
+        if (typeof size !== 'number') return size;
+        if (size < 1024) return size + ' B';
+        if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+        return (size / 1024 / 1024).toFixed(2) + ' MB';
+    }
+
+    /**
+     * 工具：格式化时间戳
+     */
+    _formatTime(ts) {
+        // 支持 ISO 字符串或时间戳
+        let d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000);
+        if (isNaN(d.getTime())) return '-';
+        return d.toLocaleString('zh-CN', { hour12: false });
+    }
+
+    // ...existing code...
 
     /**
      * 初始化模式选择器事件处理
@@ -328,6 +426,69 @@ constructor() {
         setTimeout(() => {
             notification.remove();
         }, 3000);
+    }
+
+    // 显示文档详情模态框
+    showDocumentDetail(detail) {
+        const modal = document.getElementById('docDetailModal');
+        const body = document.getElementById('docDetailBody');
+        const title = document.getElementById('docDetailTitle');
+        if (!modal || !body || !title) return;
+
+        title.textContent = `文档详情：${detail.name}`;
+        const sizeText = detail.size ? this._formatSize(detail.size) : '-';
+        const uploadTime = detail.upload_time || '-';
+        const chunks = detail.chunks || 0;
+        const status = detail.status || '-';
+
+        let html = `
+            <p><strong>路径：</strong> ${this.escapeHtml(detail.path || '-')}</p>
+            <p><strong>大小：</strong> ${sizeText}</p>
+            <p><strong>上传时间：</strong> ${this.escapeHtml(uploadTime)}</p>
+            <p><strong>分块数：</strong> ${chunks}</p>
+            <p><strong>状态：</strong> ${this.escapeHtml(status)}</p>
+            <hr />
+            <h4>分块预览（显示前 2000 字）</h4>
+        `;
+
+        if (detail.chunks_detail && detail.chunks_detail.length > 0) {
+            html += '<div class="chunks-list">';
+            detail.chunks_detail.forEach((c, idx) => {
+                html += `<div class="chunk-item"><h5>Chunk ${idx + 1}</h5><div class="chunk-content">${this.markdownToHtml(c.content)}</div></div>`;
+            });
+            html += '</div>';
+        } else {
+            html += '<p style="color:#666">暂无分块预览</p>';
+        }
+
+        body.innerHTML = html;
+
+        // 绑定按钮
+        const reindexBtn = document.getElementById('docReindexBtn');
+        const closeBtn = document.getElementById('docCloseBtn');
+        reindexBtn.dataset.filename = detail.name;
+
+        const handleClose = () => {
+            modal.style.display = 'none';
+            reindexBtn.removeEventListener('click', handleReindex);
+            closeBtn.removeEventListener('click', handleClose);
+        };
+
+        const handleReindex = async (e) => {
+            if (this.onReindexDocument) {
+                const filename = e.target.dataset.filename;
+                await this.onReindexDocument(filename);
+            }
+        };
+
+        reindexBtn.addEventListener('click', handleReindex);
+        closeBtn.addEventListener('click', handleClose);
+
+        modal.style.display = 'flex';
+    }
+
+    bindReindexDocument(callback) {
+        this.onReindexDocument = callback;
     }
 
     updateStats(stats) {

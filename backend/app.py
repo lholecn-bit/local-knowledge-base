@@ -441,6 +441,113 @@ def delete_document(filename):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/documents/<filename>/detail', methods=['GET', 'OPTIONS'])
+def document_detail(filename):
+    """返回文档的元数据与分块预览"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    if not kb:
+        return jsonify({'error': '知识库未初始化'}), 500
+
+    try:
+        stats = kb.get_stats()
+        files = stats.get('files', [])
+        for f in files:
+            if f.get('name') == filename:
+                # 从 kb.file_metadata 取 chunks_detail（如果存在）
+                meta = kb.file_metadata.get(filename, {})
+                chunks_detail = meta.get('chunks_detail')
+                # 如果没有 chunks_detail，尝试按需生成（不持久化）
+                if not chunks_detail:
+                    try:
+                        file_path = meta.get('path') or f.get('path')
+                        # 如果记录的 path 不存在，尝试在常见目录中查找（uploads/, knowledge_db/documents/）
+                        if not file_path or not os.path.exists(file_path):
+                            candidates = []
+                            # backend/uploads
+                            uploads_dir = Path(__file__).parent / 'uploads'
+                            if uploads_dir.exists():
+                                for p in uploads_dir.iterdir():
+                                    if p.name.endswith(filename) or p.name.endswith('_' + filename):
+                                        candidates.append(str(p))
+                            # knowledge_db/documents
+                            docs_dir = Path(__file__).parent / 'knowledge_db' / 'documents'
+                            if docs_dir.exists():
+                                for p in docs_dir.iterdir():
+                                    if p.name.endswith(filename) or p.name.endswith('_' + filename):
+                                        candidates.append(str(p))
+                            if candidates:
+                                file_path = candidates[0]
+                        if file_path and os.path.exists(file_path):
+                            docs, err = kb._load_file(Path(file_path))
+                            if not err and docs:
+                                splitter = None
+                                try:
+                                    from langchain_text_splitters import RecursiveCharacterTextSplitter
+                                    splitter = RecursiveCharacterTextSplitter(
+                                        chunk_size=kb.chunk_size,
+                                        chunk_overlap=kb.chunk_overlap
+                                    )
+                                except Exception:
+                                    splitter = None
+
+                                chunks_detail = []
+                                if splitter:
+                                    split_docs = splitter.split_documents(docs)
+                                    for idx, doc in enumerate(split_docs):
+                                        chunks_detail.append({'id': idx, 'content': doc.page_content[:2000]})
+                                # 持久化 chunks_detail 到 metadata（便于后续快速读取）
+                                try:
+                                    kb.file_metadata.setdefault(filename, {})
+                                    kb.file_metadata[filename]['chunks_detail'] = chunks_detail
+                                    kb.file_metadata[filename]['chunks'] = len(chunks_detail)
+                                    kb._save_metadata()
+                                except Exception as e:
+                                    print(f"⚠️ 持久化 chunks_detail 失败: {e}")
+                    except Exception as e:
+                        print(f"⚠️ 生成分块预览失败: {e}")
+
+                detail = {
+                    'name': f.get('name'),
+                    'path': f.get('path'),
+                    'upload_time': f.get('upload_time'),
+                    'size': f.get('size'),
+                    'chunks': f.get('chunks'),
+                    'status': f.get('status'),
+                    'chunks_detail': chunks_detail or []
+                }
+                return jsonify({'file': detail}), 200
+
+        return jsonify({'error': '文档未找到'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/documents/<filename>/reindex', methods=['POST', 'OPTIONS'])
+def document_reindex(filename):
+    """触发基于当前元数据的全量重建索引（同步操作，可能耗时）"""
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    if not kb:
+        return jsonify({'error': '知识库未初始化'}), 500
+
+    try:
+        # 简单校验文档存在
+        if filename not in kb.file_metadata:
+            return jsonify({'error': '文档未找到'}), 404
+
+        # 调用重建索引方法
+        success = kb._rebuild_vector_store()
+        if success:
+            return jsonify({'message': '重建完成'}), 200
+        else:
+            return jsonify({'error': '重建失败'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/health', methods=['GET', 'OPTIONS'])  
 def health_check():
     """健康检查"""

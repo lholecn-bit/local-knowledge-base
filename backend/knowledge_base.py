@@ -194,6 +194,82 @@ class LocalKnowledgeBase:
         except Exception as e:
             print(f"❌ 向量库保存失败: {e}")
             return False
+
+    def _rebuild_vector_store(self):
+        """根据当前元数据重建向量索引（从磁盘文件加载所有文档并重建 FAISS）。
+        说明：该方法只重建向量索引，不会修改 `file_metadata` 的时间等字段。
+        """
+        if not self.embeddings:
+            print("⚠️ Embeddings 未初始化，无法重建索引")
+            return False
+
+        # 收集所有文件路径
+        file_paths = []
+        for fname, meta in self.file_metadata.items():
+            path = meta.get('path')
+            if path:
+                p = Path(path)
+                if p.exists():
+                    file_paths.append(str(p))
+
+        if not file_paths:
+            print("⚠️ 未找到可用于重建的文档文件，清空向量库")
+            self.vector_store = None
+            # 删除已存在的 faiss_index 目录以避免不一致
+            try:
+                faiss_path = self.db_path / "faiss_index"
+                if faiss_path.exists():
+                    import shutil
+                    shutil.rmtree(str(faiss_path))
+            except Exception as e:
+                print(f"⚠️ 删除旧向量库失败: {e}")
+            return True
+
+        try:
+            print(f"🔧 重建向量库：将从 {len(file_paths)} 个文件创建索引...")
+
+            all_documents = []
+            for fp in file_paths:
+                try:
+                    docs, err = self._load_file(Path(fp))
+                    if err:
+                        print(f"  ⚠️ 加载文档失败: {fp} -> {err}")
+                        continue
+                    all_documents.extend(docs)
+                except Exception as e:
+                    print(f"  ❌ 读取文件 {fp} 失败: {e}")
+
+            if not all_documents:
+                print("⚠️ 没有可用文档内容来重建索引")
+                self.vector_store = None
+                return True
+
+            # 分割文档
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap
+            )
+            split_docs = splitter.split_documents(all_documents)
+            print(f"✅ 分割完成，共 {len(split_docs)} 个 chunks，开始创建/替换 FAISS 索引...")
+
+            # 使用 FAISS.from_documents 重新创建索引
+            try:
+                self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+                # 保存到磁盘
+                self.save_vector_store()
+                print(f"✅ 向量库重建完成: {self.vector_store.index.ntotal} 个向量")
+                return True
+            except Exception as e:
+                print(f"❌ 创建向量库失败: {e}")
+                import traceback
+                traceback.print_exc()
+                return False
+
+        except Exception as e:
+            print(f"❌ 重建向量库错误: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def add_documents(self, file_paths: List[str], progress_callback=None) -> Dict:
         """添加文档 - 支持进度回调"""
@@ -248,6 +324,27 @@ class LocalKnowledgeBase:
         )
         split_docs = splitter.split_documents(all_documents)
         print(f"✅ 分割完成，共 {len(split_docs)} 个 chunks")
+        # ===== 保存分块内容到元数据（按文件分组） =====
+        try:
+            chunks_by_file = {}
+            for idx, doc in enumerate(split_docs):
+                source = doc.metadata.get('source', 'unknown')
+                entry = {
+                    'id': idx,
+                    'content': doc.page_content[:2000]  # 保存前2k字符用于预览
+                }
+                chunks_by_file.setdefault(source, []).append(entry)
+
+            # 将分块详情合并到 file_metadata 中
+            for file_path, doc_count in processed_files.items():
+                file_name = self._clean_filename(Path(file_path).name)
+                if file_name in chunks_by_file:
+                    self.file_metadata.setdefault(file_name, {})
+                    self.file_metadata[file_name]['chunks_detail'] = chunks_by_file[file_name]
+                    # ensure chunks count recorded
+                    self.file_metadata[file_name]['chunks'] = len(chunks_by_file[file_name])
+        except Exception as e:
+            print(f"⚠️ 保存分块详情失败: {e}")
         
         # 📤 发送分割进度（40-60%）
         if progress_callback:
@@ -300,12 +397,22 @@ class LocalKnowledgeBase:
             # 更新元数据
             for file_path, doc_count in processed_files.items():
                 file_name = self._clean_filename(Path(file_path).name)
-                self.file_metadata[file_name] = {
+                # 不要覆盖已有 metadata（例如 chunks_detail），而是更新字段
+                self.file_metadata.setdefault(file_name, {})
+                # 如果之前已经计算了分块详情，则优先使用其长度作为 chunks
+                existing_chunks = self.file_metadata[file_name].get('chunks')
+                if existing_chunks is None:
+                    # 如果没有，尝试使用 chunks_detail 长度
+                    existing_chunks = len(self.file_metadata[file_name].get('chunks_detail', [])) or doc_count
+
+                self.file_metadata[file_name].update({
                     'path': file_path,
                     'hash': self._calculate_file_hash(file_path),
                     'added_time': datetime.now().isoformat(),
-                    'doc_count': doc_count
-                }
+                    'chunks': existing_chunks,
+                    'size': Path(file_path).stat().st_size if Path(file_path).exists() else None,
+                    'status': 'indexed'
+                })
             
             self._save_metadata()
             
@@ -549,7 +656,11 @@ class LocalKnowledgeBase:
                 {
                     'name': filename,
                     'path': metadata.get('path', ''),
-                    'added_time': metadata.get('added_time', '')
+                    'added_time': metadata.get('added_time', ''),
+                    'upload_time': metadata.get('added_time', ''),
+                    'size': metadata.get('size'),
+                    'chunks': metadata.get('chunks') or metadata.get('doc_count') or 0,
+                    'status': metadata.get('status', 'unknown')
                 }
                 for filename, metadata in self.file_metadata.items()
             ]
@@ -581,9 +692,24 @@ class LocalKnowledgeBase:
     def delete_document(self, filename: str):
         """删除指定文档"""
         if filename in self.file_metadata:
+            # 尝试删除物理文件
+            try:
+                path = Path(self.file_metadata[filename].get('path', ''))
+                if path.exists():
+                    path.unlink()
+                    # 如果所在目录变空可选择删除目录，但这里不做额外删除
+            except Exception as e:
+                print(f"⚠️ 删除物理文件失败: {e}")
+
+            # 从元数据中移除并保存
             del self.file_metadata[filename]
             self._save_metadata()
-            self.load_vector_store()
+
+            # 重新构建向量库以移除该文档的向量（较重，但确保索引一致）
+            rebuilt = self._rebuild_vector_store()
+            if not rebuilt:
+                print("⚠️ 重建向量库失败，尝试加载原有向量库")
+                self.load_vector_store()
     
     def add_documents_from_upload(self, files) -> Dict:
         """从上传的文件添加文档"""
@@ -638,8 +764,23 @@ class LocalKnowledgeBase:
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(file_path, dest_path)
                     print(f"  ✅ {path.name}")
+                    # 更新元数据中的路径和大小（如果存在）
+                    clean_name = self._clean_filename(path.name)
+                    if clean_name in self.file_metadata:
+                        try:
+                            self.file_metadata[clean_name]['path'] = str(dest_path)
+                            self.file_metadata[clean_name]['size'] = dest_path.stat().st_size
+                            # 保持 status 为 indexed（如果之前已设置）
+                        except Exception as e:
+                            print(f"  ⚠️ 更新元数据大小/路径失败: {e}")
                 except Exception as e:
                     print(f"  ⚠️  保存失败: {e}")
+
+            # 保存更新后的元数据
+            try:
+                self._save_metadata()
+            except Exception as e:
+                print(f"⚠️ 保存元数据失败: {e}")
             
             print(f"\n✅ 上传完成!\n")
             return result
