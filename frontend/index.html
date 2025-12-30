@@ -7,10 +7,16 @@
     <link rel="stylesheet" href="css/style.css">
     <!-- 引入 Bootstrap 快速美化样式（无需框架重构即可改善外观） -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <!-- 企业字体与图标 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <!-- Highlight.js 代码高亮库 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css">
-        <!-- ✅ 加入 marked.js Markdown 渲染库 -->
+    <!-- ✅ 加入 marked.js Markdown 渲染库 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <link rel="icon" href="favicon.svg" />
     <style>
         /* 消息样式 */
         .message {
@@ -130,7 +136,16 @@
         <aside class="sidebar">
 
             <div class="sidebar-header">
-                <h1>📚 知识库</h1>
+                <div class="brand d-flex align-items-center">
+                    <img src="logo.svg" alt="logo" class="brand-logo" />
+                    <div class="brand-text">
+                        <div class="brand-title">知识库</div>
+                        <div class="brand-sub">Local KB</div>
+                    </div>
+                </div>
+                <button id="sidebarToggle" class="btn btn-sm btn-light" style="position:absolute; right:12px; top:16px; border-radius:8px;">
+                    <i class="fa fa-bars"></i>
+                </button>
             </div>
 
             <!-- 侧边栏导航 -->
@@ -197,6 +212,13 @@
 
         <!-- 主内容区域 -->
         <main class="main-content">
+            <!-- 主区顶部标题栏 -->
+            <header class="main-header d-flex align-items-center justify-content-between px-3 py-2 bg-white" style="border-bottom:1px solid #eef2f7;">
+                <h4 id="panelTitle" style="margin:0; font-weight:700; color: #111827;">问答检索</h4>
+                <div class="d-flex align-items-center gap-2">
+                    <button id="docMgmtToggle" class="btn btn-outline-secondary btn-sm">文档管理</button>
+                </div>
+            </header>
             <!-- 对话检索区（默认显示） -->
             <div class="chat-container" id="chatPanel">
                 <div class="chat-history" id="chatHistory">

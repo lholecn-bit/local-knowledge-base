@@ -6,21 +6,23 @@
 }
 
 :root {
-    --primary-color: #3b82f6;
-    --secondary-color: #10b981;
-    --danger-color: #ef4444;
+    /* 企业主题色（可按品牌替换） */
+    --primary-color: #0b63ff; /* 深蓝主色 */
+    --accent-color: #0066cc;  /* 辅助色 */
+    --muted-color: #6b7280;
+    --danger-color: #dc2626;
     --warning-color: #f59e0b;
-    --text-color: #1f2937;
-    --border-color: #e5e7eb;
-    --bg-color: #f9fafb;
+    --text-color: #0f172a;
+    --border-color: #e6eef9;
+    --bg-color: #f6f9ff;
     --white: #ffffff;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
+    --shadow: 0 4px 12px rgba(11,99,255,0.06);
+    --shadow-lg: 0 14px 40px rgba(11,99,255,0.08);
 }
 
 html, body {
     height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     color: var(--text-color);
     background-color: var(--bg-color);
 }
@@ -42,17 +44,30 @@ html, body {
     box-shadow: var(--shadow);
 }
 
+/* 折叠侧边栏样式 */
+.sidebar.collapsed {
+    width: 72px;
+}
+.sidebar.collapsed .brand-text { display: none; }
+.sidebar.collapsed .documents-section { display: none; }
+.sidebar.collapsed .upload-section { display: none; }
+.sidebar.collapsed .stats-card { display: none; }
+.sidebar.collapsed .sidebar-nav .nav-link { text-align: center; padding-left: 0.5rem; padding-right: 0.5rem; }
+.sidebar {
+    transition: width 0.22s ease;
+}
+
 .sidebar-header {
     padding: 20px;
     border-bottom: 1px solid var(--border-color);
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
+    background: linear-gradient(90deg, rgba(11,99,255,0.12), rgba(6,150,200,0.04));
+    color: var(--primary-color);
 }
 
-.sidebar-header h1 {
-    font-size: 24px;
-    font-weight: bold;
-}
+.brand { gap: 12px; }
+.brand-logo { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; }
+.brand-title { font-size: 18px; font-weight: 700; color: var(--text-color); }
+.brand-sub { font-size: 12px; color: var(--muted-color); }
 
 /* 统计卡片 */
 .stats-card {
@@ -838,3 +853,99 @@ html, body {
     color: #666;
     line-height: 1.4;
 }
+
+/* ================= UI Enhancements ================= */
+
+/* 侧边栏导航美化 */
+.sidebar-nav ul {
+    list-style: none;
+    padding: 0 12px 12px 12px;
+}
+.sidebar-nav li {
+    margin-bottom: 6px;
+}
+.sidebar-nav .nav-link {
+    display: block;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: #374151;
+    text-decoration: none;
+    font-weight: 600;
+}
+.sidebar-nav .nav-link:hover {
+    background: rgba(59,130,246,0.08);
+    color: var(--primary-color);
+}
+.sidebar-nav .nav-link.active {
+    background: linear-gradient(90deg, rgba(59,130,246,0.12), rgba(16,185,129,0.04));
+    color: var(--primary-color);
+    box-shadow: var(--shadow);
+}
+
+/* 主区卡片化和标题 */
+.main-content > .chat-container, .main-content > .doc-mgmt-container {
+    margin: 18px;
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+.chat-container .welcome-message {
+    padding: 40px 30px;
+}
+
+/* 文档管理工具栏与表格美化 */
+.doc-mgmt-toolbar {
+    display: flex;
+    gap: 10px;
+    padding: 12px 18px;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+.doc-mgmt-toolbar input[type="text"] {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.doc-mgmt-table-wrapper {
+    padding: 12px 18px 18px 18px;
+}
+.doc-mgmt-table {
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.doc-mgmt-table thead th {
+    background: #f8fafc;
+    font-weight: 600;
+}
+.doc-mgmt-table tbody tr:hover {
+    background: #fbfdff;
+}
+
+/* 改善按钮视觉一致性 */
+.btn {
+    border-radius: 8px;
+}
+
+/* 模态与浮层更明显 */
+.modal-content {
+    max-width: 720px;
+}
+
+/* 小屏优化：侧边栏折叠感 */
+@media (max-width: 900px) {
+    .sidebar {
+        width: 100%;
+        max-height: 180px;
+    }
+    .main-content > .chat-container, .main-content > .doc-mgmt-container {
+        margin: 12px;
+    }
+}
+
+/* 小细节：表格操作按钮对齐 */
+.doc-action-btns { display: flex; gap: 6px; }
+
+/* 结束 UI Enhancements */

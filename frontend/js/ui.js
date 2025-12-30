@@ -29,12 +29,15 @@ constructor() {
         this.navDocMgmt = document.getElementById('navDocMgmt');
         this.chatPanel = document.getElementById('chatPanel');
         this.docMgmtPanel = document.getElementById('docMgmtPanel');
+        this.docMgmtToggle = document.getElementById('docMgmtToggle');
         this.docSearchInput = document.getElementById('docSearchInput');
         this.docRefreshBtn = document.getElementById('docRefreshBtn');
         this.docBatchDeleteBtn = document.getElementById('docBatchDeleteBtn');
         this.docMgmtTable = document.getElementById('docMgmtTable');
         this.docMgmtTableBody = document.getElementById('docMgmtTableBody');
         this.docSelectAll = document.getElementById('docSelectAll');
+        this.sidebar = document.querySelector('.sidebar');
+        this.sidebarToggle = document.getElementById('sidebarToggle');
 
         this.isLoading = false;
         this.abortController = null;
@@ -46,6 +49,8 @@ constructor() {
         this._initModeSelector();
         // 初始化导航切换
         this._initNavSwitch();
+        // 应用侧边栏折叠状态（如有）
+        this._applySidebarState();
     }
 
     /**
@@ -61,14 +66,49 @@ constructor() {
                 e.preventDefault();
                 this.showDocMgmtPanel();
             });
+            // 顶部切换按钮
+            if (this.docMgmtToggle) {
+                this.docMgmtToggle.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    // 如果当前文档管理可见，则切回聊天
+                    if (this.docMgmtPanel.style.display !== 'none') {
+                        this.showChatPanel();
+                    } else {
+                        this.showDocMgmtPanel();
+                    }
+                });
+            }
         }
+            // 侧边栏折叠按钮
+            if (this.sidebarToggle && this.sidebar) {
+                this.sidebarToggle.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.toggleSidebar();
+                });
+            }
     }
 
+
+    toggleSidebar() {
+        if (!this.sidebar) return;
+        const collapsed = this.sidebar.classList.toggle('collapsed');
+        try { localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+    }
+
+    _applySidebarState() {
+        try {
+            const v = localStorage.getItem('sidebarCollapsed');
+            if (v === '1' && this.sidebar) this.sidebar.classList.add('collapsed');
+        } catch (e) {}
+    }
     showChatPanel() {
         this.chatPanel.style.display = '';
         this.docMgmtPanel.style.display = 'none';
         this.navChat.classList.add('active');
         this.navDocMgmt.classList.remove('active');
+        const title = document.getElementById('panelTitle');
+        if (title) title.textContent = '问答检索';
+        if (this.docMgmtToggle) this.docMgmtToggle.textContent = '文档管理';
     }
 
     showDocMgmtPanel() {
@@ -76,6 +116,9 @@ constructor() {
         this.docMgmtPanel.style.display = '';
         this.navChat.classList.remove('active');
         this.navDocMgmt.classList.add('active');
+        const title = document.getElementById('panelTitle');
+        if (title) title.textContent = '文档管理';
+        if (this.docMgmtToggle) this.docMgmtToggle.textContent = '返回问答';
     }
 
     /**
